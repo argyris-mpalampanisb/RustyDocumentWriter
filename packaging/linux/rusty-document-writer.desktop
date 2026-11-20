@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=RustyDocumentWriter
+Comment=Word processor with faithful DOCX layout
+Exec=rusty-document-writer %f
+Terminal=false
+Categories=Office;WordProcessor;
+MimeType=application/vnd.openxmlformats-officedocument.wordprocessingml.document;

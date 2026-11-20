@@ -1,0 +1,45 @@
+1	72.0	RustyDocumentWriter Fidelity S
+1	110.3	A test of faithful DOCX layout
+1	148.1	1. Character formatting
+1	180.2	Plain, bold, italic, underline
+1	206.9	Lorem ipsum dolor sit amet, co
+1	323.8	Η γρήγορη καφέ αλεπού πηδά πάν
+1	372.9	2. Lists and tabs
+1	405.4	First bullet
+1	421.2	Second bullet
+1	437.4	Nested bullet
+1	452.8	Third bullet
+1	469.0	Step one
+1	484.9	Step two
+1	500.2	Sub-step a
+1	515.7	Sub-step b
+1	531.5	Step three
+1	554.8	Introduction1
+1	578.5	LeftCentered1234.56
+1	612.2	3. Tables
+1	644.7	Feature
+1	644.7	Status
+1	644.7	Notes
+1	644.7	
+1	678.8	Merged vertically
+1	658.4	Done
+1	658.4	Cell text wraps inside its col
+1	658.4	
+1	678.8	
+1	699.2	Spans two columns
+1	699.2	
+2	72.0	
+2	95.7	3.1 An inline picture
+2	122.3	/
+2	222.2	“Quotes use their own style, c
+2	245.9	
+3	72.0	4. Second page
+3	104.4	Lorem ipsum dolor sit amet, co
+3	174.4	Lorem ipsum dolor sit amet, co
+3	244.7	Lorem ipsum dolor sit amet, co
+3	315.0	Lorem ipsum dolor sit amet, co
+3	385.0	Lorem ipsum dolor sit amet, co
+3	455.3	Lorem ipsum dolor sit amet, co
+3	525.7	Lorem ipsum dolor sit amet, co
+3	596.0	Lorem ipsum dolor sit amet, co
+PAGES	3

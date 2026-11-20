@@ -1,0 +1,10 @@
+# Portable Windows executables: link the C runtime statically so no
+# Visual C++ Redistributable (vcruntime140.dll) is needed on the target PC.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.i686-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

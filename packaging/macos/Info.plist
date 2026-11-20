@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>RustyDocumentWriter</string>
+  <key>CFBundleDisplayName</key><string>RustyDocumentWriter</string>
+  <key>CFBundleIdentifier</key><string>org.rustydocumentwriter.editor</string>
+  <key>CFBundleExecutable</key><string>rusty-document-writer</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>VERSION</string>
+  <key>CFBundleVersion</key><string>VERSION</string>
+  <key>LSMinimumSystemVersion</key><string>10.13</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>DOCX Document</string>
+      <key>CFBundleTypeRole</key><string>Editor</string>
+      <key>LSItemContentTypes</key><array><string>org.openxmlformats.wordprocessingml.document</string></array>
+      <key>CFBundleTypeExtensions</key><array><string>docx</string></array>
+    </dict>
+  </array>
+</dict>
+</plist>
