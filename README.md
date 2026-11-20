@@ -124,7 +124,7 @@ RustyDocumentWriter embeds **Liberation Sans** (SIL OFL), which is **metric-comp
 
 Portable, single-file builds with **no installer and no runtime**. Unzip and run! 🚀
 
-| | 🪟 Windows 10/11 | 🍎 macOS 10.13+ | 🐧 Linux (glibc 2.35+) |
+| | 🪟 Windows 10/11 | 🍎 macOS 11+ | 🐧 Linux (glibc 2.35+) |
 |---|:---:|:---:|:---:|
 | **x64** | `rusty-document-writer-windows-x64.zip` | `rusty-document-writer-macos-x64.zip` | `rusty-document-writer-linux-x64.tar.gz` |
 | **ARM64** | `rusty-document-writer-windows-arm64.zip` | `rusty-document-writer-macos-arm64.zip` | `rusty-document-writer-linux-arm64.tar.gz` |

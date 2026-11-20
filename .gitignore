@@ -87,3 +87,6 @@ __MACOSX/
 *.key
 *.pfx
 *.p12
+
+# ---- Personal notes (kept local) ----
+/github commands cheat sheet.md

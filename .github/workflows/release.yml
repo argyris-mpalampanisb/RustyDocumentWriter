@@ -47,13 +47,14 @@ jobs:
 
   macos:
     name: macOS (x64, arm64, universal)
-    runs-on: macos-14
+    # macos-latest always maps to a supported Apple Silicon image (macos-14 has been retired).
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: "x86_64-apple-darwin,aarch64-apple-darwin" }
       - name: Build both architectures
-        env: { MACOSX_DEPLOYMENT_TARGET: "10.13" }
+        env: { MACOSX_DEPLOYMENT_TARGET: "11.0" }
         run: |
           cargo build --release --locked --target x86_64-apple-darwin
           cargo build --release --locked --target aarch64-apple-darwin
