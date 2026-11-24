@@ -618,8 +618,15 @@ fn home(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
                     // Preview using the style's resolved formatting.
                     let rp = app.doc.resolver().run(id, None, None);
                     let col = rp.color.map(|c| Color32::from_rgb(c.0, c.1, c.2)).unwrap_or(Color32::BLACK);
-                    let size = (rp.size * 1.15).clamp(10.0, 22.0);
-                    let font = if rp.bold { theme::bold_font(size) } else { theme::ui_font(size) };
+                    let mk = |size: f32| if rp.bold { theme::bold_font(size) } else { theme::ui_font(size) };
+                    let mut size = (rp.size * 1.15).clamp(10.0, 22.0);
+                    // Shrink large previews (headings, title) so the whole name fits the tile.
+                    let tw = p.layout_no_wrap(name.to_string(), mk(size), col).size().x;
+                    let room = tile_w - 14.0;
+                    if tw > room {
+                        size = (size * room / tw).max(9.0);
+                    }
+                    let font = mk(size);
                     let clip = rect.shrink(4.0);
                     p.with_clip_rect(clip).text(pos2(rect.left() + 8.0, rect.center().y), Align2::LEFT_CENTER, *name, font, col);
                     let r = r.on_hover_text(*name);
@@ -673,7 +680,7 @@ fn home(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
     });
 }
 
-fn insert(_app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
+fn insert(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
     group(ui, "Pages", |ui| {
         if big(ui, Icon::CoverPage, "Cover\nPage", true, false).clicked() {}
         if big(ui, Icon::BlankPage, "Blank\nPage", false, true).clicked() {
@@ -745,11 +752,13 @@ fn insert(_app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
         }
     });
     group(ui, "Header & Footer", |ui| {
-        for (ic, l) in [(Icon::Header, "Header"), (Icon::Footer, "Footer"), (Icon::PageNumber, "Page\nNumber")] {
+        for (ic, l) in [(Icon::Header, "Header"), (Icon::Footer, "Footer")] {
             if big(ui, ic, l, true, true).clicked() {
                 cmds.push(Cmd::Unsupported("Header & Footer gallery (double-click a header to edit it)"));
             }
         }
+        let r = big(ui, Icon::PageNumber, "Page\nNumber", true, true);
+        page_number_menu(app, &r, cmds);
     });
     group(ui, "Text", |ui| {
         if big(ui, Icon::TextBox, "Text\nBox", true, false).clicked() {}
@@ -1162,6 +1171,113 @@ fn help(ui: &mut Ui, cmds: &mut Vec<Cmd>) {
 }
 
 // ---------------------------------------------------------------------------
+// Insert → Page Number gallery
+
+fn page_number_menu(app: &App, r: &Response, cmds: &mut Vec<Cmd>) {
+    use rusty_document_writer::pagenum::{self, Place};
+    egui::Popup::from_toggle_button_response(r).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+        let id = Id::NULL.with("pagenum-place");
+        let mut place: Place = ui.data(|d| d.get_temp(id)).unwrap_or(Place::Bottom);
+        ui.set_width(300.0);
+        ui.horizontal(|ui| {
+            for (p, label) in [(Place::Bottom, "Bottom of Page"), (Place::Top, "Top of Page")] {
+                if ui.selectable_label(place == p, label).clicked() {
+                    place = p;
+                }
+            }
+        });
+        ui.data_mut(|d| d.insert_temp(id, place));
+        ui.separator();
+        egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+            for st in pagenum::STYLES {
+                let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 64.0), Sense::click());
+                if resp.hovered() {
+                    ui.painter().rect_filled(rect, 3.0, HOVER);
+                }
+                let tile = Rect::from_min_size(rect.min + vec2(4.0, 4.0), vec2(rect.width() - 8.0, 40.0));
+                paint_page_number_preview(ui, tile, st, place);
+                ui.painter().text(pos2(tile.left(), tile.bottom() + 9.0), Align2::LEFT_CENTER, st.name, theme::ui_font(12.0), TEXT);
+                if resp.clicked() {
+                    cmds.push(Cmd::PageNumber(st.id, place));
+                    ui.close();
+                }
+            }
+        });
+        ui.separator();
+        ui.label(egui::RichText::new("Number format").size(11.5).color(TEXT_DIM));
+        let cur = app.doc.page_number_format();
+        ui.horizontal_wrapped(|ui| {
+            for (fmt, label) in pagenum::FORMATS {
+                if ui.selectable_label(cur == *fmt, *label).clicked() {
+                    cmds.push(Cmd::PageNumberFormat(fmt));
+                }
+            }
+        });
+        ui.separator();
+        let has = app.doc.has_page_numbers();
+        if ui.add_enabled(has, egui::Button::new("Remove Page Numbers").frame(false).min_size(vec2(ui.available_width(), 24.0))).clicked() {
+            cmds.push(Cmd::RemovePageNumbers);
+            ui.close();
+        }
+    });
+}
+
+/// A miniature page edge showing where and how the number will appear.
+fn paint_page_number_preview(ui: &Ui, tile: Rect, st: &rusty_document_writer::pagenum::PnStyle, place: rusty_document_writer::pagenum::Place) {
+    use rusty_document_writer::pagenum::{Align as PA, Place};
+    let p = ui.painter();
+    p.rect_filled(tile, 2.0, Color32::WHITE);
+    let margin = 18.0;
+    let inner = tile.shrink2(vec2(margin, 0.0));
+    let accent = Color32::from_rgb(0x15, 0x60, 0x82);
+    let rule = Color32::from_gray(0xA6);
+    let ink = Color32::from_gray(0x20);
+    // Body text hint on the side away from the number.
+    let (num_y, text_y0) = match place {
+        Place::Bottom => (tile.bottom() - 11.0, tile.top() + 6.0),
+        Place::Top => (tile.top() + 11.0, tile.bottom() - 14.0),
+    };
+    for i in 0..2 {
+        let y = text_y0 + i as f32 * 5.0;
+        let w = if i == 1 { inner.width() * 0.6 } else { inner.width() };
+        p.hline(inner.left()..=(inner.left() + w), y, Stroke::new(2.0, Color32::from_gray(0xE2)));
+    }
+    let (label, color, font) = match st.id {
+        "brackets" => ("[1]", ink, theme::ui_font(10.0)),
+        "thick_line" => ("1", accent, theme::bold_font(10.0)),
+        _ => ("1", ink, theme::ui_font(10.0)),
+    };
+    let (x, align) = match st.align {
+        PA::Left => (inner.left(), Align2::LEFT_CENTER),
+        PA::Center => (inner.center().x, Align2::CENTER_CENTER),
+        PA::Right => (inner.right(), Align2::RIGHT_CENTER),
+    };
+    p.text(pos2(x, num_y), align, label, font, color);
+    // Decorative rules on the side facing the body text.
+    let toward_body = if place == Place::Bottom { -8.0 } else { 8.0 };
+    match st.id {
+        "thin_line" => {
+            // Inset like the real rule (1" of 6.5" text width per side), swelling toward the middle.
+            let inset = inner.width() * (1.0 / 6.5);
+            let (x0, x1, y) = (inner.left() + inset, inner.right() - inset, num_y + toward_body);
+            let n = 24;
+            let pt = |i: usize, sign: f32| {
+                let t = i as f32 / n as f32;
+                let half = (0.3 + 1.1 * (std::f32::consts::PI * t).sin()) / 2.0;
+                pos2(x0 + (x1 - x0) * t, y + sign * half)
+            };
+            let mut poly: Vec<egui::Pos2> = (0..=n).map(|i| pt(i, -1.0)).collect();
+            poly.extend((0..=n).rev().map(|i| pt(i, 1.0)));
+            p.add(egui::Shape::convex_polygon(poly, rule, Stroke::NONE));
+        }
+        "thick_line" => {
+            p.hline(inner.x_range(), num_y + toward_body, Stroke::new(3.0, accent));
+        }
+        _ => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Status bar
 
 pub fn status_bar(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
@@ -1172,7 +1288,7 @@ pub fn status_bar(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
     let y = bar.center().y;
     let pages = app.layout.as_ref().map(|l| l.pages.len()).unwrap_or(1);
     let cur_page = app.locate(&app.caret).map(|(p, _)| p + 1).unwrap_or(1);
-    let words = if app.layout_version % 1 == 0 { app.word_count() } else { 0 };
+    let words = app.word_count();
     let mut x = bar.left() + 12.0;
     for (i, t) in [format!("Page {cur_page} of {pages}"), format!("{} words", words), "English (United States)".into(), "Accessibility: Good to go".into()].iter().enumerate() {
         let rect = Rect::from_min_size(pos2(x - 4.0, bar.top() + 2.0), vec2(text_width(ui, t, 12.0) + 8.0, STATUS_H - 4.0));

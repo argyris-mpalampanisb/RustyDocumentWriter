@@ -15,6 +15,7 @@ pub mod fonts;
 pub mod layout;
 pub mod model;
 pub mod opc;
+pub mod pagenum;
 pub mod props;
 pub mod render;
 pub mod template;

@@ -55,6 +55,8 @@ pub enum Cmd {
     New,
     Open,
     OpenPath(PathBuf),
+    RemoveRecent(PathBuf),
+    ClearRecent,
     Save,
     SaveAs,
     CloseDoc,
@@ -92,6 +94,9 @@ pub enum Cmd {
     InsertPicture,
     InsertSymbol(char),
     InsertDateTime,
+    PageNumber(&'static str, rusty_document_writer::pagenum::Place),
+    PageNumberFormat(&'static str),
+    RemovePageNumbers,
     Margins(f32, f32, f32, f32),
     Orientation(bool),
     PageSize(f32, f32),
@@ -185,11 +190,15 @@ pub struct App {
     pub find_text: String,
     pub replace_text: String,
     pub recent: Vec<PathBuf>,
+    /// (layout_version, words): the word count is only recomputed when the document changes.
+    word_cache: std::cell::Cell<(u64, usize)>,
     pub dragging: bool,
     pub pending_scroll: Option<f32>,
     pub view_width: f32,
     pub icon_font: bool,
     pub frame_count: u64,
+    pub last_zoom: f32,
+    pub zoom_changed: Instant,
 }
 
 fn recent_path() -> Option<PathBuf> {
@@ -205,7 +214,15 @@ impl App {
         font_names.dedup();
         let doc = Document::new_blank();
         let caret = edit::start_of_doc(&doc);
-        let recent = recent_path().and_then(|p| std::fs::read_to_string(p).ok()).map(|s| s.lines().map(PathBuf::from).filter(|p| p.exists()).collect()).unwrap_or_default();
+        let mut recent: Vec<PathBuf> = Vec::new();
+        for p in recent_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default().lines() {
+            // Canonical form so "docs/a.docx" and "/home/me/docs/a.docx" are one entry.
+            if let Ok(p) = std::fs::canonicalize(p) {
+                if !recent.contains(&p) {
+                    recent.push(p);
+                }
+            }
+        }
         let mut app = App {
             fonts,
             doc,
@@ -238,11 +255,14 @@ impl App {
             find_text: String::new(),
             replace_text: String::new(),
             recent,
+            word_cache: std::cell::Cell::new((u64::MAX, 0)),
             dragging: false,
             pending_scroll: None,
             view_width: 1000.0,
             icon_font,
             frame_count: 0,
+            last_zoom: 1.2,
+            zoom_changed: Instant::now(),
         };
         if let Some(p) = open {
             app.open_path(&p);
@@ -580,7 +600,14 @@ impl App {
                 self.after_load();
                 self.push_recent(p);
             }
-            Err(e) => self.dialog = Dialog::Message("Couldn't open the document".into(), e),
+            Err(e) => {
+                // A recent entry whose file has gone away is just noise: drop it.
+                if !p.exists() && self.recent.iter().any(|x| x == p) {
+                    self.recent.retain(|x| x != p);
+                    self.save_recent();
+                }
+                self.dialog = Dialog::Message("Couldn't open the document".into(), e)
+            }
         }
     }
 
@@ -600,10 +627,19 @@ impl App {
     }
 
     fn push_recent(&mut self, p: &Path) {
-        let p = p.to_path_buf();
+        let p = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
         self.recent.retain(|x| x != &p);
         self.recent.insert(0, p);
         self.recent.truncate(15);
+        self.save_recent();
+    }
+
+    pub fn remove_recent(&mut self, p: &Path) {
+        self.recent.retain(|x| x != p);
+        self.save_recent();
+    }
+
+    fn save_recent(&self) {
         if let Some(rp) = recent_path() {
             let _ = std::fs::create_dir_all(rp.parent().unwrap());
             let _ = std::fs::write(rp, self.recent.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n"));
@@ -664,6 +700,11 @@ impl App {
                     return;
                 }
                 self.open_path(&p);
+            }
+            Cmd::RemoveRecent(p) => self.remove_recent(&p),
+            Cmd::ClearRecent => {
+                self.recent.clear();
+                self.save_recent();
             }
             Cmd::Save => {
                 self.save(false);
@@ -909,6 +950,23 @@ impl App {
                 }
             }
             Cmd::InsertSymbol(c) => self.type_text(&c.to_string()),
+            Cmd::PageNumber(id, place) => {
+                if let Some(st) = rusty_document_writer::pagenum::style(id) {
+                    self.checkpoint("pagenum");
+                    self.doc.insert_page_number(st, place);
+                    self.invalidate();
+                }
+            }
+            Cmd::PageNumberFormat(fmt) => {
+                self.checkpoint("pagenum");
+                self.doc.set_page_number_format(fmt);
+                self.invalidate();
+            }
+            Cmd::RemovePageNumbers => {
+                self.checkpoint("pagenum");
+                self.doc.remove_page_numbers();
+                self.invalidate();
+            }
             Cmd::InsertDateTime => {
                 let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
                 let (y, m, d) = civil_from_days(secs / 86400);
@@ -970,8 +1028,15 @@ impl App {
         }
     }
 
+    /// Word count, cached per layout version (the status bar asks for it every frame).
     pub fn word_count(&self) -> usize {
-        self.doc.word_count()
+        let (v, n) = self.word_cache.get();
+        if v == self.layout_version && !self.layout_dirty {
+            return n;
+        }
+        let n = self.doc.word_count();
+        self.word_cache.set((self.layout_version, n));
+        n
     }
 }
 

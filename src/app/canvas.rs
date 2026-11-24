@@ -455,26 +455,52 @@ pub fn document_area(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
         let kk = k(app);
         let scale = kk * ppp;
         let mut rendered = 0;
+        let skey = (scale * 1000.0) as u32 ^ if app.dark_page { 1 << 31 } else { 0 };
+        // While the zoom is still moving (Ctrl+wheel, slider drag) re-rasterising every
+        // frame is wasted work: stretch the existing texture and render once it settles.
+        if (app.zoom - app.last_zoom).abs() > f32::EPSILON {
+            app.last_zoom = app.zoom;
+            app.zoom_changed = Instant::now();
+        }
+        let zoom_settling = app.zoom_changed.elapsed() < Duration::from_millis(150);
+        if zoom_settling {
+            ctx.request_repaint_after(Duration::from_millis(160));
+        }
+        let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+        let keep = viewport.expand2(vec2(0.0, viewport.height().max(400.0) * 2.0));
         for (i, r) in rects.iter().enumerate() {
             if !r.intersects(viewport.expand(200.0)) {
                 continue;
             }
             let sr = r.translate(origin.to_vec2());
             painter.rect_filled(sr.translate(vec2(0.0, 2.0)).expand(1.5), 0.0, Color32::from_black_alpha(90));
-            let up_to_date = app.textures.get(&i).is_some_and(|(_, s, v)| *v == app.layout_version && *s == ((scale * 1000.0) as u32 ^ if app.dark_page { 1 << 31 } else { 0 }));
-            if !up_to_date && rendered >= 3 {
-                // Defer: draw a blank page now, render next frame.
-                painter.rect_filled(sr, 0.0, if app.dark_page { Color32::from_gray(0x1E) } else { Color32::WHITE });
-                ctx.request_repaint();
+            let cached = app.textures.get(&i).map(|(t, s, v)| (t.id(), *s, *v));
+            let up_to_date = cached.is_some_and(|(_, s, v)| v == app.layout_version && s == skey);
+            let same_content = cached.is_some_and(|(_, s, v)| v == app.layout_version && (s >> 31) == (skey >> 31));
+            if !up_to_date && (rendered >= 3 || (zoom_settling && same_content)) {
+                // Defer: show the previous rendering (or a blank page) now, render later.
+                match cached {
+                    Some((tid, _, _)) => {
+                        painter.image(tid, sr, uv, Color32::WHITE);
+                    }
+                    None => {
+                        painter.rect_filled(sr, 0.0, if app.dark_page { Color32::from_gray(0x1E) } else { Color32::WHITE });
+                    }
+                }
+                if rendered >= 3 {
+                    ctx.request_repaint();
+                }
                 continue;
             }
             if !up_to_date {
                 rendered += 1;
             }
             if let Some(tid) = ensure_texture(app, &ctx, i, scale) {
-                painter.image(tid, sr, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                painter.image(tid, sr, uv, Color32::WHITE);
             }
         }
+        // Free page textures well outside the view (and those of pages that no longer exist).
+        app.textures.retain(|i, _| rects.get(*i).is_some_and(|r| r.intersects(keep)));
 
         // Selection.
         let layout = app.layout.as_ref();

@@ -147,23 +147,82 @@ pub fn show(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
 }
 
 fn recent_list(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
-    ui.label(egui::RichText::new("Recent").size(15.0).color(TEXT));
+    let width = ui.available_width().min(700.0);
+    // Header row: "Recent" on the left, "Clear all" on the right.
+    let (hdr, _) = ui.allocate_exact_size(vec2(width, 22.0), Sense::hover());
+    ui.painter().text(hdr.left_center(), Align2::LEFT_CENTER, "Recent", theme::ui_font(15.0), TEXT);
+    if !app.recent.is_empty() {
+        let galley = ui.painter().layout_no_wrap("Clear all".into(), theme::ui_font(12.5), ACCENT_TEXT);
+        let cr = Rect::from_min_size(pos2(hdr.right() - galley.size().x - 8.0, hdr.center().y - 10.0), vec2(galley.size().x + 8.0, 20.0));
+        let r = ui.interact(cr, egui::Id::NULL.with("recent-clear"), Sense::click()).on_hover_text("Remove every document from the Recent list");
+        if r.hovered() {
+            ui.painter().rect_filled(cr, 3.0, Color32::from_rgb(0x33, 0x33, 0x33));
+        }
+        ui.painter().galley(pos2(cr.left() + 4.0, cr.center().y - galley.size().y / 2.0), galley, ACCENT_TEXT);
+        if r.clicked() {
+            cmds.push(Cmd::ClearRecent);
+        }
+    }
     ui.add_space(6.0);
     if app.recent.is_empty() {
         ui.label(egui::RichText::new("Documents you open will show up here.").color(TEXT_DIM));
+        return;
     }
-    for p in app.recent.clone() {
-        let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        let dir = p.parent().map(|d| d.display().to_string()).unwrap_or_default();
-        let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width().min(700.0), 44.0), Sense::click());
-        if r.hovered() {
-            ui.painter().rect_filled(rect, 4.0, Color32::from_rgb(0x33, 0x33, 0x33));
+    egui::ScrollArea::vertical().id_salt("recent-scroll").auto_shrink([false, true]).show(ui, |ui| {
+        for p in app.recent.clone() {
+            recent_row(ui, &p, width, cmds);
         }
-        icons::paint(ui.painter(), Icon::Generic, Rect::from_center_size(pos2(rect.left() + 20.0, rect.center().y), vec2(20.0, 24.0)), ACCENT_TEXT);
-        ui.painter().text(pos2(rect.left() + 44.0, rect.top() + 14.0), Align2::LEFT_CENTER, name, theme::ui_font(13.5), TEXT);
-        ui.painter().text(pos2(rect.left() + 44.0, rect.top() + 31.0), Align2::LEFT_CENTER, dir, theme::ui_font(11.5), TEXT_DIM);
-        if r.clicked() {
-            cmds.push(Cmd::OpenPath(p.clone()));
-        }
+    });
+}
+
+fn recent_row(ui: &mut Ui, p: &std::path::Path, width: f32, cmds: &mut Vec<Cmd>) {
+    let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let dir = p.parent().map(|d| d.display().to_string()).unwrap_or_default();
+    let (rect, r) = ui.allocate_exact_size(vec2(width, 44.0), Sense::click());
+    // The remove button sits on top of the row, so it takes the click when hovered.
+    let xr = Rect::from_center_size(pos2(rect.right() - 22.0, rect.center().y), vec2(26.0, 26.0));
+    let xresp = ui.interact(xr, egui::Id::NULL.with(("recent-remove", p)), Sense::click()).on_hover_text("Remove from list");
+    let row_hot = r.hovered() || xresp.hovered() || r.context_menu_opened();
+    let painter = ui.painter_at(rect);
+    if row_hot {
+        painter.rect_filled(rect, 4.0, Color32::from_rgb(0x33, 0x33, 0x33));
     }
+    icons::paint(&painter, Icon::Generic, Rect::from_center_size(pos2(rect.left() + 20.0, rect.center().y), vec2(20.0, 24.0)), ACCENT_TEXT);
+    // Clip long names/paths before the remove button instead of running under it.
+    let text_clip = Rect::from_min_max(rect.min, pos2(xr.left() - 6.0, rect.bottom()));
+    let tp = ui.painter_at(text_clip);
+    tp.text(pos2(rect.left() + 44.0, rect.top() + 14.0), Align2::LEFT_CENTER, &name, theme::ui_font(13.5), TEXT);
+    tp.text(pos2(rect.left() + 44.0, rect.top() + 31.0), Align2::LEFT_CENTER, &dir, theme::ui_font(11.5), TEXT_DIM);
+    if row_hot {
+        if xresp.hovered() {
+            painter.rect_filled(xr, 4.0, Color32::from_rgb(0x48, 0x48, 0x48));
+        }
+        let c = xr.center();
+        let s = 4.5;
+        let stroke = Stroke::new(1.4, if xresp.hovered() { TEXT } else { TEXT_DIM });
+        painter.line_segment([c + vec2(-s, -s), c + vec2(s, s)], stroke);
+        painter.line_segment([c + vec2(-s, s), c + vec2(s, -s)], stroke);
+    }
+    if xresp.clicked() {
+        cmds.push(Cmd::RemoveRecent(p.to_path_buf()));
+    } else if r.clicked() {
+        cmds.push(Cmd::OpenPath(p.to_path_buf()));
+    }
+    let r = r.on_hover_text(p.display().to_string());
+    r.context_menu(|ui| {
+        ui.set_min_width(180.0);
+        if ui.button("Open").clicked() {
+            cmds.push(Cmd::OpenPath(p.to_path_buf()));
+        }
+        if ui.button("Copy path").clicked() {
+            ui.ctx().copy_text(p.display().to_string());
+        }
+        ui.separator();
+        if ui.button("Remove from list").clicked() {
+            cmds.push(Cmd::RemoveRecent(p.to_path_buf()));
+        }
+        if ui.button("Clear all recent documents").clicked() {
+            cmds.push(Cmd::ClearRecent);
+        }
+    });
 }

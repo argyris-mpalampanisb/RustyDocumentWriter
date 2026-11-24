@@ -173,8 +173,30 @@ impl Renderer {
                         let cy = (crop[1] * sh).max(0.0) as u32;
                         let cw = ((1.0 - crop[0] - crop[2]) * sw).max(1.0) as u32;
                         let ch = ((1.0 - crop[1] - crop[3]) * sh).max(1.0) as u32;
-                        let view = image::imageops::crop_imm(src.as_ref(), cx.min(src.width() - 1), cy.min(src.height() - 1), cw.min(src.width()), ch.min(src.height())).to_image();
-                        let s = Arc::new(image::imageops::resize(&view, dw, dh, image::imageops::FilterType::Triangle));
+                        let mut view = image::imageops::crop_imm(src.as_ref(), cx.min(src.width() - 1), cy.min(src.height() - 1), cw.min(src.width()), ch.min(src.height())).to_image();
+                        // Resize with premultiplied alpha: otherwise the colour of fully transparent
+                        // pixels (often black) bleeds into the edges as a dark fringe.
+                        let has_alpha = view.pixels().any(|p| p[3] < 255);
+                        if has_alpha {
+                            for p in view.pixels_mut() {
+                                let a = p[3] as u32;
+                                for c in 0..3 {
+                                    p[c] = ((p[c] as u32 * a + 127) / 255) as u8;
+                                }
+                            }
+                        }
+                        let mut s = image::imageops::resize(&view, dw, dh, image::imageops::FilterType::Triangle);
+                        if has_alpha {
+                            for p in s.pixels_mut() {
+                                let a = p[3] as u32;
+                                if a > 0 {
+                                    for c in 0..3 {
+                                        p[c] = ((p[c] as u32 * 255 + a / 2) / a).min(255) as u8;
+                                    }
+                                }
+                            }
+                        }
+                        let s = Arc::new(s);
                         if self.scaled.len() > 64 {
                             self.scaled.clear();
                         }
