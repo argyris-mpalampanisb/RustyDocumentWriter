@@ -104,6 +104,7 @@ We open the test documents in a **reference word processor**, record where every
 - 🧊 Built-in library of 18 3D shapes (cube, gem, heart, crown…) in any colour, rendered with Blender and inserted as ordinary pictures (`tools/shapes/` regenerates them)
 - ✨ Text themes: 12 one-click presets, plus outline, shadow, emboss, engrave, small/all caps, double strike and 11 underline styles (wave, dot-dash…) with underline colour, all saved as standard DOCX properties
 - 🎨 App themes: 23 colour themes for the ribbon, menus and canvas: Word's Black and White, 14 converted from VS Code (Dark/Light Modern, Monokai, Solarized, Night Owl, Abyss…) and 7 from Zed (One, Ayu, Gruvbox). Pick one under File ▸ Theme or View ▸ App Theme; `tools/themes/generate.sh` converts more
+- ⚙️ File ▸ Options: follow the system's light/dark mode with a theme for each, any accent colour, interface size (80–150%), a collapsible ribbon (Ctrl+F1 or double-click a tab), a status bar you can trim (right-click it), cursor blink and width, and the starting zoom
 - 🎨 Font, size, colour, highlight, case
 - 📐 Alignment, indents, spacing, borders, shading
 - 🏷️ Style gallery

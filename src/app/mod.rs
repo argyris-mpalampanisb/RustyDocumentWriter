@@ -7,6 +7,7 @@ mod ribbon;
 mod wordart_ui;
 pub mod theme;
 mod files;
+pub mod settings;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -58,6 +59,7 @@ pub enum Cmd {
     Open,
     OpenPath(PathBuf),
     Export,
+    ToggleRibbon,
     RemoveRecent(PathBuf),
     ClearRecent,
     Save,
@@ -238,6 +240,9 @@ pub struct App {
     pub zoom_changed: Instant,
     /// A conversion running in the background (see `files`).
     pub job: Option<files::Job>,
+    pub settings: settings::Settings,
+    /// Ribbon shown temporarily while collapsed (a tab was clicked).
+    pub ribbon_peek: bool,
 }
 
 fn recent_path() -> Option<PathBuf> {
@@ -262,6 +267,7 @@ impl App {
                 }
             }
         }
+        let settings = settings::Settings::load();
         let mut app = App {
             fonts,
             doc,
@@ -276,11 +282,11 @@ impl App {
             undo: Vec::new(),
             redo: Vec::new(),
             last_edit: None,
-            zoom: 1.2,
+            zoom: settings.start_zoom,
             tab: Tab::Home,
             show_marks: false,
-            show_ruler: false,
-            show_nav: false,
+            show_ruler: settings.show_ruler,
+            show_nav: settings.show_nav,
             dark_page: false,
             shape_color: Some("156082".into()),
             shape_thumbs: None,
@@ -304,10 +310,13 @@ impl App {
             view_width: 1000.0,
             icon_font,
             frame_count: 0,
-            last_zoom: 1.2,
+            last_zoom: settings.start_zoom,
             zoom_changed: Instant::now(),
             job: None,
+            settings,
+            ribbon_peek: false,
         };
+        app.settings.apply(&cc.egui_ctx);
         if let Some(p) = open {
             app.open_path(&p);
         }
@@ -1134,8 +1143,20 @@ impl App {
                     };
                 }
             }
-            Cmd::ToggleRuler => self.show_ruler = !self.show_ruler,
-            Cmd::ToggleNav => self.show_nav = !self.show_nav,
+            Cmd::ToggleRuler => {
+                self.show_ruler = !self.show_ruler;
+                let on = self.show_ruler;
+                self.change_settings(|s| s.show_ruler = on);
+            }
+            Cmd::ToggleNav => {
+                self.show_nav = !self.show_nav;
+                let on = self.show_nav;
+                self.change_settings(|s| s.show_nav = on);
+            }
+            Cmd::ToggleRibbon => {
+                self.ribbon_peek = false;
+                self.change_settings(|s| s.ribbon_collapsed = !s.ribbon_collapsed);
+            }
             Cmd::DarkPage => {
                 self.dark_page = !self.dark_page;
                 self.textures.clear();
@@ -1150,6 +1171,15 @@ impl App {
             Cmd::Unsupported(what) => {
                 self.dialog = Dialog::Message("Not available yet".into(), format!("“{what}” isn't implemented in this version of RustyDocumentWriter yet. Any existing content of this kind in your documents is preserved when you save."))
             }
+        }
+    }
+
+    /// Change preferences and remember them (they take effect on the next frame).
+    pub fn change_settings(&mut self, f: impl FnOnce(&mut settings::Settings)) {
+        let before = self.settings.clone();
+        f(&mut self.settings);
+        if self.settings != before {
+            self.settings.save();
         }
     }
 
@@ -1199,6 +1229,11 @@ impl eframe::App for App {
 
         self.ensure_layout();
         let mut cmds: Vec<Cmd> = Vec::new();
+        // Theme (it may follow the system's appearance), accent and interface size.
+        self.settings.apply(&ctx);
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::F1)) {
+            cmds.push(Cmd::ToggleRibbon);
+        }
 
         egui::Frame::new().fill(theme::pal().canvas).show(ui, |ui| {
             ui.set_min_size(ui.available_size());
@@ -1207,8 +1242,12 @@ impl eframe::App for App {
                 backstage::show(self, ui, &mut cmds);
             } else {
                 ribbon::tabs_row(self, ui, &mut cmds);
-                ribbon::ribbon(self, ui, &mut cmds);
-                ribbon::status_bar(self, ui, &mut cmds);
+                if !self.settings.ribbon_collapsed || self.ribbon_peek {
+                    ribbon::ribbon(self, ui, &mut cmds);
+                }
+                if self.settings.show_status_bar {
+                    ribbon::status_bar(self, ui, &mut cmds);
+                }
                 canvas::document_area(self, ui, &mut cmds);
             }
         });
@@ -1226,7 +1265,7 @@ impl eframe::App for App {
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        [0.04, 0.04, 0.04, 1.0]
+        theme::pal().canvas.to_normalized_gamma_f32()
     }
 }
 

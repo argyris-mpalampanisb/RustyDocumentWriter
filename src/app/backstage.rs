@@ -12,6 +12,7 @@ enum Page {
     Open,
     Info,
     Theme,
+    Options,
 }
 
 pub fn show(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
@@ -60,6 +61,9 @@ pub fn show(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
     }
     if item(&mut sui, "Theme", Some(Icon::DarkMode), page == Page::Theme) {
         page = Page::Theme;
+    }
+    if item(&mut sui, "Options", None, page == Page::Options) {
+        page = Page::Options;
     }
     if item(&mut sui, "Save", None, false) {
         cmds.push(Cmd::Save);
@@ -111,7 +115,8 @@ pub fn show(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
             cui.add_space(20.0);
             recent_list(app, &mut cui, cmds);
         }
-        Page::Theme => theme_page(&mut cui),
+        Page::Theme => theme_page(app, &mut cui),
+        Page::Options => options_page(app, &mut cui),
         Page::Info => {
             cui.label(egui::RichText::new("Info").size(26.0).color(pal().text));
             cui.add_space(12.0);
@@ -234,9 +239,18 @@ fn recent_row(ui: &mut Ui, p: &std::path::Path, width: f32, cmds: &mut Vec<Cmd>)
 }
 
 /// File ▸ Theme: every UI theme as a miniature window, grouped by where it comes from.
-fn theme_page(ui: &mut Ui) {
+fn theme_page(app: &mut App, ui: &mut Ui) {
     ui.label(egui::RichText::new("Theme").size(26.0).color(pal().text));
     ui.label(egui::RichText::new("Colours for the ribbon, menus and the area around the pages. Your documents are not changed.").color(pal().text_dim));
+    if app.settings.follow_system {
+        ui.label(
+            egui::RichText::new(format!(
+                "Following your system's appearance: light mode uses {}, dark mode uses {}. Picking a theme replaces the one for its mode.",
+                app.settings.light_theme, app.settings.dark_theme
+            ))
+            .color(pal().accent_text),
+        );
+    }
     ui.add_space(8.0);
     let mut pick = None;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
@@ -256,8 +270,148 @@ fn theme_page(ui: &mut Ui) {
         ui.add_space(20.0);
     });
     if let Some(i) = pick {
-        theme::set(ui.ctx(), i);
-        theme::save();
+        app.change_settings(|s| s.choose_theme(i));
+    }
+}
+
+fn section(ui: &mut Ui, title: &str) {
+    ui.add_space(14.0);
+    ui.label(egui::RichText::new(title).size(16.0).color(pal().text));
+    let y = ui.cursor().top() + 2.0;
+    ui.painter().hline(ui.max_rect().left()..=(ui.max_rect().left() + 520.0), y, Stroke::new(1.0, pal().sep));
+    ui.add_space(8.0);
+}
+
+fn theme_combo(ui: &mut Ui, id: &str, value: &mut String, only_dark: Option<bool>) {
+    egui::ComboBox::from_id_salt(id).width(220.0).height(420.0).selected_text(value.clone()).show_ui(ui, |ui| {
+        for p in theme::PALETTES.iter().filter(|p| only_dark.is_none_or(|d| p.dark == d)) {
+            let label = format!("{}  ·  {}", p.name, p.source);
+            if ui.selectable_label(*value == p.name, label).clicked() {
+                *value = p.name.to_string();
+            }
+        }
+    });
+}
+
+/// A round colour button; returns true when clicked.
+fn accent_chip(ui: &mut Ui, color: Color32, selected: bool, tip: &str) -> bool {
+    let (rect, r) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::click());
+    let p = ui.painter();
+    p.circle_filled(rect.center(), 10.0, color);
+    if selected {
+        p.circle_stroke(rect.center(), 12.5, Stroke::new(2.0, pal().text));
+    } else if r.hovered() {
+        p.circle_stroke(rect.center(), 12.5, Stroke::new(1.0, pal().border()));
+    }
+    r.on_hover_text(tip).clicked()
+}
+
+/// File ▸ Options: appearance, ribbon and status bar, editing.
+fn options_page(app: &mut App, ui: &mut Ui) {
+    ui.label(egui::RichText::new("Options").size(26.0).color(pal().text));
+    ui.label(egui::RichText::new("Changes apply right away and are remembered.").color(pal().text_dim));
+    let mut s = app.settings.clone();
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        section(ui, "Appearance");
+        ui.radio_value(&mut s.follow_system, false, "Use one theme");
+        if !s.follow_system {
+            ui.horizontal(|ui| {
+                ui.add_space(24.0);
+                theme_combo(ui, "opt-theme", &mut s.theme, None);
+            });
+        }
+        ui.radio_value(&mut s.follow_system, true, "Match the system's light or dark mode");
+        if s.follow_system {
+            egui::Grid::new("opt-modes").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add_space(24.0);
+                    ui.label("Light mode");
+                });
+                theme_combo(ui, "opt-light", &mut s.light_theme, Some(false));
+                ui.end_row();
+                ui.horizontal(|ui| {
+                    ui.add_space(24.0);
+                    ui.label("Dark mode");
+                });
+                theme_combo(ui, "opt-dark", &mut s.dark_theme, Some(true));
+                ui.end_row();
+            });
+            if ui.ctx().system_theme().is_none() {
+                ui.label(egui::RichText::new("Your system doesn't report light or dark mode, so the single theme above is used.").small().color(pal().text_dim));
+            }
+        }
+        ui.add_space(10.0);
+        ui.label("Accent colour");
+        ui.horizontal_wrapped(|ui| {
+            let own = theme::PALETTES[theme::current()].accent;
+            if accent_chip(ui, own, s.accent.is_none(), "The theme's own accent") {
+                s.accent = None;
+            }
+            ui.add_space(6.0);
+            for (name, c) in super::settings::ACCENTS {
+                if accent_chip(ui, *c, s.accent == Some(*c), name) {
+                    s.accent = Some(*c);
+                }
+            }
+            let mut custom = s.accent.unwrap_or(own);
+            if ui.color_edit_button_srgba(&mut custom).on_hover_text("Any colour").changed() {
+                s.accent = Some(custom);
+            }
+        });
+        ui.add_space(10.0);
+        ui.label("Interface size");
+        ui.horizontal(|ui| {
+            for &k in super::settings::SCALES {
+                if ui.selectable_label((s.ui_scale - k).abs() < 0.01, format!("{}%", (k * 100.0).round())).clicked() {
+                    s.ui_scale = k;
+                }
+            }
+        });
+
+        section(ui, "Ribbon and status bar");
+        ui.checkbox(&mut s.ribbon_collapsed, "Collapse the ribbon to its tabs (Ctrl+F1, or double-click a tab)");
+        ui.checkbox(&mut s.show_status_bar, "Show the status bar");
+        ui.add_enabled_ui(s.show_status_bar, |ui| {
+            ui.indent("status-items", |ui| {
+                ui.checkbox(&mut s.status_page, "Page number");
+                ui.checkbox(&mut s.status_words, "Word count");
+                ui.checkbox(&mut s.status_language, "Language");
+                ui.checkbox(&mut s.status_accessibility, "Accessibility");
+                ui.checkbox(&mut s.status_view, "View shortcuts");
+                ui.checkbox(&mut s.status_zoom, "Zoom slider");
+                ui.label(egui::RichText::new("Tip: right-click the status bar to change these too.").small().color(pal().text_dim));
+            });
+        });
+
+        section(ui, "Editing");
+        ui.checkbox(&mut s.caret_blink, "Blinking cursor");
+        ui.horizontal(|ui| {
+            ui.label("Cursor width");
+            ui.add(egui::Slider::new(&mut s.caret_width, 1.0..=4.0).step_by(0.5).suffix(" px"));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Zoom when starting");
+            egui::ComboBox::from_id_salt("opt-zoom").selected_text(format!("{}%", (s.start_zoom * 100.0).round())).show_ui(ui, |ui| {
+                for z in [0.75f32, 1.0, 1.2, 1.5, 2.0] {
+                    if ui.selectable_label((s.start_zoom - z).abs() < 0.01, format!("{}%", (z * 100.0).round())).clicked() {
+                        s.start_zoom = z;
+                    }
+                }
+            });
+        });
+        ui.checkbox(&mut s.show_ruler, "Show the ruler");
+        ui.checkbox(&mut s.show_nav, "Show the navigation pane");
+
+        ui.add_space(18.0);
+        if ui.button("Restore all defaults").clicked() {
+            s = super::settings::Settings::default();
+        }
+        ui.add_space(20.0);
+    });
+    if s != app.settings {
+        app.show_ruler = s.show_ruler;
+        app.show_nav = s.show_nav;
+        app.change_settings(|x| *x = s);
     }
 }
 

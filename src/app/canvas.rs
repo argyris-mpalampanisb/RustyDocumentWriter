@@ -1,6 +1,5 @@
 //! Page view: renders pages as textures and handles caret, selection and input.
 
-use super::ribbon::STATUS_H;
 use super::theme::{self, *};
 use super::{App, Cmd};
 use egui::{pos2, vec2, Align2, Color32, Event, Key, Rect, Sense, Stroke, Ui};
@@ -385,11 +384,15 @@ fn handle_keys(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>, page_h_pt: f32) 
 pub fn document_area(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
     let full = ui.max_rect();
     let top = ui.cursor().top();
-    let mut area = Rect::from_min_max(pos2(full.left(), top), pos2(full.right(), full.bottom() - STATUS_H));
+    let mut area = Rect::from_min_max(pos2(full.left(), top), pos2(full.right(), full.bottom() - super::ribbon::status_h(app)));
     if area.height() < 40.0 {
         return;
     }
     let ctx = ui.ctx().clone();
+    // A ribbon opened from a collapsed tab closes again when you go back to the document.
+    if app.ribbon_peek && ctx.input(|i| i.pointer.primary_pressed() && i.pointer.interact_pos().is_some_and(|p| area.contains(p))) {
+        app.ribbon_peek = false;
+    }
 
     // Navigation pane.
     if app.show_nav {
@@ -576,12 +579,15 @@ pub fn document_area(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
                 let font_h = (l.bottom - l.top).min((l.baseline - l.top) * 1.35 + 2.0);
                 let y0 = sr.top() + (l.baseline - font_h * 0.78).max(l.top) * kk;
                 let y1 = sr.top() + (l.baseline + font_h * 0.24).min(l.bottom) * kk;
-                let caret_rect = Rect::from_min_max(pos2(x - 0.5, y0), pos2(x + 1.0, y1));
-                let blink = app.caret_time.elapsed().as_millis() / 530 % 2 == 0;
+                let cw = app.settings.caret_width;
+                let caret_rect = Rect::from_min_max(pos2(x - cw / 3.0, y0), pos2(x + cw * 2.0 / 3.0, y1));
+                let blink = !app.settings.caret_blink || app.caret_time.elapsed().as_millis() / 530 % 2 == 0;
                 if blink && doc_focus && !app.has_sel() {
                     painter.rect_filled(caret_rect, 0.0, if app.dark_page { Color32::WHITE } else { Color32::BLACK });
                 }
-                ctx.request_repaint_after(Duration::from_millis(530));
+                if app.settings.caret_blink {
+                    ctx.request_repaint_after(Duration::from_millis(530));
+                }
                 if app.scroll_to_caret {
                     ui.scroll_to_rect(caret_rect.expand2(vec2(40.0, 60.0)), None);
                     app.scroll_to_caret = false;

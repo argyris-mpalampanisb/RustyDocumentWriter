@@ -308,7 +308,16 @@ pub fn tabs_row(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
         app.backstage = true;
     }
     for t in Tab::ALL {
-        if draw_tab(ui, t.label(), app.tab == t).clicked() {
+        let collapsed = app.settings.ribbon_collapsed;
+        // While collapsed, the selected tab is only underlined when its ribbon is showing.
+        let r = draw_tab(ui, t.label(), app.tab == t && (!collapsed || app.ribbon_peek));
+        if r.double_clicked() {
+            // Word: double-clicking a tab collapses or pins the ribbon.
+            cmds.push(Cmd::ToggleRibbon);
+        } else if r.clicked() {
+            if collapsed {
+                app.ribbon_peek = !(app.ribbon_peek && app.tab == t);
+            }
             app.tab = t;
         }
     }
@@ -348,8 +357,33 @@ pub fn ribbon(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
         Tab::View => view(app, &mut child, cmds),
         Tab::Help => help(&mut child, cmds),
     }
-    // Collapse chevron (decorative).
-    chevron(ui, pos2(panel.right() - 14.0, panel.bottom() - 12.0), pal().text_dim);
+    // Collapse / pin button.
+    let pin = Rect::from_center_size(pos2(panel.right() - 14.0, panel.bottom() - 12.0), vec2(20.0, 16.0));
+    let r = ui.interact(pin, Id::NULL.with("ribbon-pin"), Sense::click());
+    if r.hovered() {
+        ui.painter().rect_filled(pin, 3.0, pal().hover);
+    }
+    let c = pin.center();
+    if app.settings.ribbon_collapsed {
+        // A pin: keep the ribbon open.
+        let p = ui.painter();
+        p.circle_stroke(c + vec2(0.0, -2.0), 3.0, Stroke::new(1.2, pal().text_dim));
+        p.line_segment([c + vec2(0.0, 1.0), c + vec2(0.0, 6.0)], Stroke::new(1.2, pal().text_dim));
+    } else {
+        // An up-chevron: collapse.
+        let s = Stroke::new(1.3, pal().text_dim);
+        ui.painter().line_segment([c + vec2(-4.0, 2.0), c + vec2(0.0, -2.0)], s);
+        ui.painter().line_segment([c + vec2(0.0, -2.0), c + vec2(4.0, 2.0)], s);
+    }
+    let tip = if app.settings.ribbon_collapsed { "Keep the ribbon open (Ctrl+F1)" } else { "Collapse the ribbon (Ctrl+F1)" };
+    if r.on_hover_text(tip).clicked() {
+        cmds.push(Cmd::ToggleRibbon);
+    }
+}
+
+/// Height of the status bar, or 0 when it's hidden.
+pub fn status_h(app: &App) -> f32 {
+    if app.settings.show_status_bar { STATUS_H } else { 0.0 }
 }
 
 const THEME_COLORS: [[&str; 10]; 1] = [["FFFFFF", "000000", "E8E8E8", "0E2841", "156082", "E97132", "196B24", "0F9ED5", "A02B93", "4EA72E"]];
@@ -1413,8 +1447,7 @@ fn view(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
                             painter.text(pos2(rect.right() - 10.0, rect.center().y), Align2::RIGHT_CENTER, "✓", theme::ui_font(13.0), pal().accent_text);
                         }
                         if resp.clicked() {
-                            theme::set(ui.ctx(), i);
-                            theme::save();
+                            app.change_settings(|s| s.choose_theme(i));
                         }
                     }
                     ui.add_space(4.0);
@@ -1598,12 +1631,35 @@ pub fn status_bar(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
     let bar = Rect::from_min_max(pos2(full.left(), full.bottom() - STATUS_H), full.right_bottom());
     let p = ui.painter().clone();
     p.rect_filled(bar, 0.0, pal().bg);
+    // Right-click anywhere on the bar to choose what it shows, as in Word.
+    let bar_resp = ui.interact(bar, Id::NULL.with("status-bar"), Sense::click());
+    bar_resp.context_menu(|ui| {
+        let mut s = app.settings.clone();
+        ui.label(egui::RichText::new("Customize Status Bar").small().color(pal().text_dim));
+        ui.checkbox(&mut s.status_page, "Page Number");
+        ui.checkbox(&mut s.status_words, "Word Count");
+        ui.checkbox(&mut s.status_language, "Language");
+        ui.checkbox(&mut s.status_accessibility, "Accessibility Checker");
+        ui.checkbox(&mut s.status_view, "View Shortcuts");
+        ui.checkbox(&mut s.status_zoom, "Zoom Slider");
+        ui.separator();
+        if ui.button("Hide the status bar").clicked() {
+            s.show_status_bar = false;
+            ui.close();
+        }
+        if s != app.settings {
+            app.change_settings(|x| *x = s);
+        }
+    });
     let y = bar.center().y;
     let pages = app.layout.as_ref().map(|l| l.pages.len()).unwrap_or(1);
     let cur_page = app.locate(&app.caret).map(|(p, _)| p + 1).unwrap_or(1);
     let words = app.word_count();
     let mut x = bar.left() + 12.0;
-    for (i, t) in [format!("Page {cur_page} of {pages}"), format!("{} words", words), "English (United States)".into(), "Accessibility: Good to go".into()].iter().enumerate() {
+    let st = &app.settings;
+    let shown = [st.status_page, st.status_words, st.status_language, st.status_accessibility];
+    let items = [format!("Page {cur_page} of {pages}"), format!("{} words", words), "English (United States)".into(), "Accessibility: Good to go".into()];
+    for (i, t) in items.iter().enumerate().filter(|(i, _)| shown[*i]) {
         let rect = Rect::from_min_size(pos2(x - 4.0, bar.top() + 2.0), vec2(text_width(ui, t, 12.0) + 8.0, STATUS_H - 4.0));
         let r = ui.interact(rect, Id::NULL.with(("status", i)), Sense::click());
         if r.hovered() {
@@ -1616,34 +1672,40 @@ pub fn status_bar(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
         x += text_width(ui, t, 12.0) + 24.0;
     }
     // Right side: zoom.
+    let (show_zoom, show_view) = (app.settings.status_zoom, app.settings.status_view);
     let mut rx = bar.right() - 12.0;
-    let pct = format!("{}%", (app.zoom * 100.0).round() as i32);
-    p.text(pos2(rx, y), Align2::RIGHT_CENTER, &pct, theme::ui_font(12.0), pal().text_dim);
-    rx -= 50.0;
-    let plus = Rect::from_center_size(pos2(rx, y), vec2(16.0, 16.0));
-    if ui.interact(plus, Id::NULL.with("zplus"), Sense::click()).clicked() {
-        cmds.push(Cmd::Zoom(((app.zoom * 10.0).round() + 1.0) / 10.0));
+    if show_zoom {
+        let pct = format!("{}%", (app.zoom * 100.0).round() as i32);
+        p.text(pos2(rx, y), Align2::RIGHT_CENTER, &pct, theme::ui_font(12.0), pal().text_dim);
+        rx -= 50.0;
+        let plus = Rect::from_center_size(pos2(rx, y), vec2(16.0, 16.0));
+        if ui.interact(plus, Id::NULL.with("zplus"), Sense::click()).clicked() {
+            cmds.push(Cmd::Zoom(((app.zoom * 10.0).round() + 1.0) / 10.0));
+        }
+        p.text(plus.center(), Align2::CENTER_CENTER, "+", theme::ui_font(15.0), pal().text_dim);
+        let slider = Rect::from_min_max(pos2(rx - 120.0, y - 6.0), pos2(rx - 12.0, y + 6.0));
+        p.hline(slider.x_range(), y, Stroke::new(1.0, pal().text_dim));
+        p.vline(slider.center().x, (y - 4.0)..=(y + 4.0), Stroke::new(1.0, pal().text_dim));
+        // Map 10%..100% to the left half and 100%..500% to the right half.
+        let t = if app.zoom <= 1.0 { (app.zoom - 0.1) / 0.9 * 0.5 } else { 0.5 + (app.zoom - 1.0) / 4.0 * 0.5 };
+        let kx = slider.left() + t.clamp(0.0, 1.0) * slider.width();
+        p.rect_filled(Rect::from_center_size(pos2(kx, y), vec2(4.0, 12.0)), 1.0, pal().text);
+        let sr = ui.interact(slider.expand(4.0), Id::NULL.with("zslider"), Sense::click_and_drag());
+        if let (true, Some(pos)) = (sr.dragged() || sr.clicked(), sr.interact_pointer_pos()) {
+            let t = ((pos.x - slider.left()) / slider.width()).clamp(0.0, 1.0);
+            let z = if t <= 0.5 { 0.1 + t / 0.5 * 0.9 } else { 1.0 + (t - 0.5) / 0.5 * 4.0 };
+            cmds.push(Cmd::Zoom((z * 100.0).round() / 100.0));
+        }
+        let minus = Rect::from_center_size(pos2(slider.left() - 12.0, y), vec2(16.0, 16.0));
+        if ui.interact(minus, Id::NULL.with("zminus"), Sense::click()).clicked() {
+            cmds.push(Cmd::Zoom(((app.zoom * 10.0).round() - 1.0).max(1.0) / 10.0));
+        }
+        p.text(minus.center(), Align2::CENTER_CENTER, "–", theme::ui_font(15.0), pal().text_dim);
+        rx = minus.left() - 14.0;
     }
-    p.text(plus.center(), Align2::CENTER_CENTER, "+", theme::ui_font(15.0), pal().text_dim);
-    let slider = Rect::from_min_max(pos2(rx - 120.0, y - 6.0), pos2(rx - 12.0, y + 6.0));
-    p.hline(slider.x_range(), y, Stroke::new(1.0, pal().text_dim));
-    p.vline(slider.center().x, (y - 4.0)..=(y + 4.0), Stroke::new(1.0, pal().text_dim));
-    // Map 10%..100% to the left half and 100%..500% to the right half.
-    let t = if app.zoom <= 1.0 { (app.zoom - 0.1) / 0.9 * 0.5 } else { 0.5 + (app.zoom - 1.0) / 4.0 * 0.5 };
-    let kx = slider.left() + t.clamp(0.0, 1.0) * slider.width();
-    p.rect_filled(Rect::from_center_size(pos2(kx, y), vec2(4.0, 12.0)), 1.0, pal().text);
-    let sr = ui.interact(slider.expand(4.0), Id::NULL.with("zslider"), Sense::click_and_drag());
-    if let (true, Some(pos)) = (sr.dragged() || sr.clicked(), sr.interact_pointer_pos()) {
-        let t = ((pos.x - slider.left()) / slider.width()).clamp(0.0, 1.0);
-        let z = if t <= 0.5 { 0.1 + t / 0.5 * 0.9 } else { 1.0 + (t - 0.5) / 0.5 * 4.0 };
-        cmds.push(Cmd::Zoom((z * 100.0).round() / 100.0));
+    if !show_view {
+        return;
     }
-    let minus = Rect::from_center_size(pos2(slider.left() - 12.0, y), vec2(16.0, 16.0));
-    if ui.interact(minus, Id::NULL.with("zminus"), Sense::click()).clicked() {
-        cmds.push(Cmd::Zoom(((app.zoom * 10.0).round() - 1.0).max(1.0) / 10.0));
-    }
-    p.text(minus.center(), Align2::CENTER_CENTER, "–", theme::ui_font(15.0), pal().text_dim);
-    rx = minus.left() - 14.0;
     // View buttons.
     for (i, ic) in [Icon::WebLayout, Icon::PrintLayout, Icon::ReadMode].iter().enumerate() {
         let r = Rect::from_center_size(pos2(rx - 14.0, y), vec2(26.0, 20.0));

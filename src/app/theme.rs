@@ -5,7 +5,7 @@
 
 use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId, TextStyle};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::RwLock;
 
 /// One UI colour theme.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -77,22 +77,61 @@ pub const PALETTES: &[Palette] = &[
     Palette { name: "Gruvbox Light", source: "Zed", dark: false, bg: rgb(0xD9, 0xC8, 0xA4), canvas: rgb(0xD9, 0xC8, 0xA4), ribbon: rgb(0xEC, 0xDD, 0xB4), hover: rgb(0xE0, 0xCF, 0xA9), pressed: rgb(0xC9, 0xB9, 0x9A), checked: rgb(0xC9, 0xB9, 0x9A), sep: rgb(0xC8, 0xB8, 0x99), text: rgb(0x28, 0x28, 0x28), text_dim: rgb(0x5F, 0x56, 0x50), text_disabled: rgb(0x89, 0x7B, 0x6E), icon: rgb(0x28, 0x28, 0x28), accent: rgb(0x0B, 0x66, 0x78), accent_text: rgb(0x0B, 0x66, 0x78), field: rgb(0xEC, 0xDD, 0xB4), window: rgb(0xEC, 0xDD, 0xB4), backstage_side: rgb(0xEC, 0xDD, 0xB4), backstage: rgb(0xFB, 0xF1, 0xC7) },
 ];
 
-static CURRENT: AtomicUsize = AtomicUsize::new(0);
-
-/// The active theme.
-pub fn pal() -> &'static Palette {
-    &PALETTES[CURRENT.load(Ordering::Relaxed).min(PALETTES.len() - 1)]
+/// The active palette: a built-in theme, possibly with the user's accent colour.
+struct Active {
+    index: usize,
+    palette: Palette,
 }
 
+static ACTIVE: RwLock<Active> = RwLock::new(Active { index: 0, palette: PALETTES[0] });
+
+/// The active palette (a copy: it's small, and the UI reads it constantly).
+pub fn pal() -> Palette {
+    ACTIVE.read().map(|a| a.palette).unwrap_or(PALETTES[0])
+}
+
+/// Index of the active theme in [`PALETTES`].
 pub fn current() -> usize {
-    CURRENT.load(Ordering::Relaxed)
+    ACTIVE.read().map(|a| a.index).unwrap_or(0)
 }
 
-/// Switch theme and restyle egui's own widgets to match.
-pub fn set(ctx: &egui::Context, index: usize) {
-    CURRENT.store(index.min(PALETTES.len() - 1), Ordering::Relaxed);
+/// Switch to theme `index`, optionally with a custom accent colour, and
+/// restyle egui's own widgets to match.
+pub fn set(ctx: &egui::Context, index: usize, accent: Option<Color32>) {
+    let index = index.min(PALETTES.len() - 1);
+    let mut palette = PALETTES[index];
+    if let Some(a) = accent {
+        palette = with_accent(palette, a);
+    }
+    if let Ok(mut act) = ACTIVE.write() {
+        if act.index == index && act.palette == palette {
+            return;
+        }
+        *act = Active { index, palette };
+    }
     apply_visuals(ctx);
     ctx.request_repaint();
+}
+
+/// `p` with accent `a`: a fill dark enough for white text, and a readable
+/// text variant for links and highlighted labels on this theme's ribbon.
+pub fn with_accent(mut p: Palette, a: Color32) -> Palette {
+    let lum = |c: Color32| 0.2126 * c.r() as f32 + 0.7152 * c.g() as f32 + 0.0722 * c.b() as f32;
+    let mut fill = a;
+    while lum(fill) > 150.0 {
+        fill = fill.lerp_to_gamma(Color32::BLACK, 0.1);
+    }
+    let mut text = a;
+    for _ in 0..10 {
+        let d = (lum(text) - lum(p.ribbon)).abs();
+        if d > 110.0 {
+            break;
+        }
+        text = text.lerp_to_gamma(if p.dark { Color32::WHITE } else { Color32::BLACK }, 0.15);
+    }
+    p.accent = fill;
+    p.accent_text = text;
+    p
 }
 
 fn apply_visuals(ctx: &egui::Context) {
@@ -126,25 +165,6 @@ fn apply_visuals(ctx: &egui::Context) {
     v.window_corner_radius = 8.into();
     v.menu_corner_radius = 6.into();
     ctx.set_visuals(v);
-}
-
-fn saved_path() -> Option<std::path::PathBuf> {
-    std::env::var("LOCALAPPDATA").or_else(|_| std::env::var("HOME")).ok().map(|b| std::path::PathBuf::from(b).join("RustyDocumentWriter").join("theme.txt"))
-}
-
-/// Remember the current theme for the next start.
-pub fn save() {
-    if let Some(path) = saved_path() {
-        let _ = path.parent().map(std::fs::create_dir_all);
-        let _ = std::fs::write(path, pal().name);
-    }
-}
-
-/// Restore the theme saved by [`save`], if any.
-pub fn load_saved(ctx: &egui::Context) {
-    if let Some(i) = saved_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|n| find(&n)) {
-        set(ctx, i);
-    }
 }
 
 /// Index of the theme called `name`, if there is one.
@@ -196,7 +216,6 @@ pub fn install(ctx: &egui::Context) -> bool {
     ctx.set_fonts(fonts);
 
     apply_visuals(ctx);
-    load_saved(ctx);
 
     let mut style = (*ctx.global_style()).clone();
     style.text_styles = [
