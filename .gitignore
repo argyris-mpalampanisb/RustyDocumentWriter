@@ -57,8 +57,10 @@ __pycache__/
 .zed/
 *.sublime-workspace
 
-# ---- Claude Code local settings ----
+# ---- Claude Code local files ----
 .claude/settings.local.json
+# Project notes for Claude Code (kept local)
+/CLAUDE.md
 
 # ---- Merge / patch leftovers & logs ----
 *.orig
