@@ -18,6 +18,10 @@ path = "src/main.rs"
 name = "rusty-document-writer-render"
 path = "src/bin/render.rs"
 
+[[bin]]
+name = "rusty-document-writer-convert"
+path = "src/bin/convert.rs"
+
 [dependencies]
 ab_glyph = "0.2.32"
 eframe = "0.37.0"

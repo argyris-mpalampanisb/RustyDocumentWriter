@@ -724,6 +724,8 @@ pub struct RunProps {
     pub cs: bool,
     pub lang: Option<String>,
     pub style_id: Option<String>,
+    /// Word 2010+ text effects (`w14:*`): gradient fill, outline, glow, shadow, reflection, 3D.
+    pub fx14: Option<std::sync::Arc<RichFx>>,
 }
 
 impl Default for RunProps {
@@ -764,8 +766,204 @@ impl Default for RunProps {
             cs: false,
             lang: None,
             style_id: None,
+            fx14: None,
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Word 2010 text effects (w14 namespace) — what WordArt is made of.
+
+/// A DrawingML paint: a solid colour or a linear gradient, with opacity.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Paint {
+    Solid(Color, f32),
+    /// Stops are (position 0..1, colour, opacity); `angle` in degrees, 0 = left to right, 90 = top to bottom.
+    Linear { stops: Vec<(f32, Color, f32)>, angle: f32 },
+}
+
+impl Paint {
+    /// Colour and opacity at `t` (0..1) along the gradient.
+    pub fn at(&self, t: f32) -> (Color, f32) {
+        match self {
+            Paint::Solid(c, a) => (*c, *a),
+            Paint::Linear { stops, .. } => {
+                let Some(first) = stops.first() else { return (Color::BLACK, 1.0) };
+                if t <= first.0 {
+                    return (first.1, first.2);
+                }
+                for w in stops.windows(2) {
+                    let (a, b) = (&w[0], &w[1]);
+                    if t <= b.0 {
+                        let k = if b.0 > a.0 { (t - a.0) / (b.0 - a.0) } else { 1.0 };
+                        let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * k).round() as u8;
+                        return (Color(m(a.1 .0, b.1 .0), m(a.1 .1, b.1 .1), m(a.1 .2, b.1 .2)), a.2 + (b.2 - a.2) * k);
+                    }
+                }
+                let last = stops.last().unwrap();
+                (last.1, last.2)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FxShadow {
+    pub blur: f32,
+    pub dist: f32,
+    /// Direction in degrees, clockwise from pointing right (90 = straight down).
+    pub dir: f32,
+    pub color: Color,
+    pub alpha: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FxReflection {
+    pub blur: f32,
+    pub start_alpha: f32,
+    pub end_alpha: f32,
+    /// Where the fade ends, as a fraction of the text height.
+    pub end_pos: f32,
+    pub dist: f32,
+}
+
+/// Text effects in points/degrees/0..1 opacities.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct RichFx {
+    /// `None` = the run's colour.
+    pub fill: Option<Paint>,
+    pub no_fill: bool,
+    /// Stroke width (pt) and paint.
+    pub outline: Option<(f32, Paint)>,
+    pub shadow: Option<FxShadow>,
+    /// Radius (pt), colour, opacity.
+    pub glow: Option<(f32, Color, f32)>,
+    pub reflection: Option<FxReflection>,
+    /// Top bevel width and height (pt).
+    pub bevel: Option<(f32, f32)>,
+    /// Extrusion depth (pt) and colour (`None` = a darker shade of the fill).
+    pub extrusion: Option<(f32, Option<Color>)>,
+    /// `w14:scene3d` camera preset, which decides the direction the extrusion shows.
+    pub camera: Option<String>,
+}
+
+fn emu_pt(e: &Element, name: &str) -> f32 {
+    e.attr_local(name).and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0) / 12700.0
+}
+
+fn per100k(e: &Element, name: &str, default: f32) -> f32 {
+    e.attr_local(name).and_then(|v| v.parse::<f32>().ok()).map(|v| v / 100000.0).unwrap_or(default)
+}
+
+/// The first colour child of `e` (srgbClr / schemeClr / prstClr) with its modifiers: (colour, opacity).
+fn w14_color(e: &Element, tc: &ThemeCtx) -> Option<(Color, f32)> {
+    let c = e.elements().find(|c| matches!(c.local(), "srgbClr" | "schemeClr" | "prstClr"))?;
+    let v = c.attr_local("val")?;
+    let mut col = match c.local() {
+        "srgbClr" => Color::from_hex(v)?,
+        "schemeClr" => tc.theme_color(match v {
+            "tx1" => "text1",
+            "tx2" => "text2",
+            "bg1" => "background1",
+            "bg2" => "background2",
+            "phClr" => "accent1",
+            o => o,
+        })?,
+        _ => match v {
+            "white" => Color::WHITE,
+            _ => Color::BLACK,
+        },
+    };
+    let (mut lm, mut lo, mut alpha) = (1.0, 0.0, 1.0);
+    for m in c.elements() {
+        match m.local() {
+            "lumMod" => lm = per100k(m, "val", 1.0),
+            "lumOff" => lo = per100k(m, "val", 0.0),
+            "tint" => col = col.tint(per100k(m, "val", 1.0)),
+            "shade" => col = col.shade(per100k(m, "val", 1.0)),
+            // Unlike DrawingML's a:alpha (opacity), w14:alpha is the transparency.
+            "alpha" => alpha = 1.0 - per100k(m, "val", 0.0),
+            _ => {}
+        }
+    }
+    if lm != 1.0 || lo != 0.0 {
+        col = col.lum_mod_off(lm, lo);
+    }
+    Some((col, alpha))
+}
+
+/// A fill-like element's paint (`solidFill` / `gradFill` child); `Some(None)` for `noFill`.
+fn w14_paint(e: &Element, tc: &ThemeCtx) -> Option<Option<Paint>> {
+    for c in e.elements() {
+        match c.local() {
+            "noFill" => return Some(None),
+            "solidFill" => return w14_color(c, tc).map(|(col, a)| Some(Paint::Solid(col, a))),
+            "gradFill" => {
+                let mut stops: Vec<(f32, Color, f32)> = c
+                    .child_local("gsLst")
+                    .map(|l| l.elements().filter_map(|gs| w14_color(gs, tc).map(|(col, a)| (per100k(gs, "pos", 0.0), col, a))).collect())
+                    .unwrap_or_default();
+                stops.sort_by(|a, b| a.0.total_cmp(&b.0));
+                let angle = c.child_local("lin").and_then(|l| l.attr_local("ang")).and_then(|v| v.parse::<f32>().ok()).map(|v| v / 60000.0).unwrap_or(90.0);
+                return (!stops.is_empty()).then_some(Some(Paint::Linear { stops, angle }));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Apply one `w14:*` rPr child to the run's effects.
+fn apply_w14(rp: &mut RunProps, c: &Element, tc: &ThemeCtx) {
+    let mut fx = rp.fx14.as_deref().cloned().unwrap_or_default();
+    match c.local() {
+        "textFill" => match w14_paint(c, tc) {
+            Some(Some(p)) => {
+                fx.fill = Some(p);
+                fx.no_fill = false;
+            }
+            Some(None) => fx.no_fill = true,
+            None => {}
+        },
+        "textOutline" => {
+            fx.outline = match w14_paint(c, tc) {
+                Some(Some(p)) => Some((emu_pt(c, "w").max(0.25), p)),
+                _ => None,
+            }
+        }
+        "shadow" => {
+            fx.shadow = w14_color(c, tc).map(|(color, alpha)| FxShadow {
+                blur: emu_pt(c, "blurRad"),
+                dist: emu_pt(c, "dist"),
+                dir: c.attr_local("dir").and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0) / 60000.0,
+                color,
+                alpha,
+            })
+        }
+        "glow" => fx.glow = w14_color(c, tc).map(|(col, a)| (emu_pt(c, "rad"), col, a)),
+        "reflection" => {
+            fx.reflection = Some(FxReflection {
+                blur: emu_pt(c, "blurRad"),
+                start_alpha: per100k(c, "stA", 0.5),
+                end_alpha: per100k(c, "endA", 0.0),
+                end_pos: per100k(c, "endPos", 0.9).max(0.01),
+                dist: emu_pt(c, "dist"),
+            })
+        }
+        "props3d" => {
+            let depth = emu_pt(c, "extrusionH");
+            let ecol = c.child_local("extrusionClr").and_then(|e| w14_color(e, tc)).map(|(col, _)| col);
+            fx.extrusion = (depth > 0.0).then_some((depth, ecol));
+            fx.bevel = c.child_local("bevelT").map(|b| {
+                let w = b.attr_local("w").map(|_| emu_pt(b, "w")).unwrap_or(6.0);
+                let h = b.attr_local("h").map(|_| emu_pt(b, "h")).unwrap_or(6.0);
+                (w, h)
+            });
+        }
+        "scene3d" => fx.camera = c.child_local("camera").and_then(|cam| cam.attr_local("prst")).map(str::to_string),
+        _ => return,
+    }
+    rp.fx14 = Some(std::sync::Arc::new(fx));
 }
 
 #[derive(Clone, Debug, Default, Copy)]
@@ -902,6 +1100,10 @@ impl ThemeCtx<'_> {
 
 fn apply_rpr(rp: &mut RunProps, tg: &mut Toggles, e: &Element, tc: &ThemeCtx) {
     for c in e.elements() {
+        if c.name.starts_with("w14:") {
+            apply_w14(rp, c, tc);
+            continue;
+        }
         match c.name.as_str() {
             "w:rFonts" => {
                 let theme = |a: &str| c.attr(a).and_then(|t| tc.theme.font(t));

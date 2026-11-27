@@ -89,6 +89,9 @@ We open the test documents in a **reference word processor**, record where every
 - 🧾 Text boxes, borders, shading, highlights
 - ✏️ Tracked changes (insertions shown, deletions hidden)
 - 🀄 East Asian document grids
+- 📥 Opens .docx, .docm, .dotx and .dotm natively, and .doc, .odt, .rtf, .html and .txt by converting them with [LibreOffice](https://www.libreoffice.org) when it's installed
+- 📤 Exports to PDF exactly as laid out on screen (no LibreOffice needed), and to .odt, .doc, .rtf, .html and .txt
+- 💾 Save as document, template or macro-enabled; saving copies every untouched part straight from the original file, still compressed
 
 </td>
 <td width="50%" valign="top">
@@ -97,6 +100,10 @@ We open the test documents in a **reference word processor**, record where every
 - ✍️ Typing, IME, selection by mouse & keyboard
 - ↩️ Undo / redo, cut / copy / paste
 - 🅱️ Bold, italic, underline, strike, sub/superscript
+- 🔠 WordArt: 12 styles with gradient fills, outlines, glow, shadow, reflection and 3D bevel/extrusion, stored as standard Word 2010 text effects; double-click a WordArt to edit it. Those effects also render in documents made in Word
+- 🧊 Built-in library of 18 3D shapes (cube, gem, heart, crown…) in any colour, rendered with Blender and inserted as ordinary pictures (`tools/shapes/` regenerates them)
+- ✨ Text themes: 12 one-click presets, plus outline, shadow, emboss, engrave, small/all caps, double strike and 11 underline styles (wave, dot-dash…) with underline colour, all saved as standard DOCX properties
+- 🎨 App themes: 23 colour themes for the ribbon, menus and canvas: Word's Black and White, 14 converted from VS Code (Dark/Light Modern, Monokai, Solarized, Night Owl, Abyss…) and 7 from Zed (One, Ayu, Gruvbox). Pick one under File ▸ Theme or View ▸ App Theme; `tools/themes/generate.sh` converts more
 - 🎨 Font, size, colour, highlight, case
 - 📐 Alignment, indents, spacing, borders, shading
 - 🏷️ Style gallery
@@ -156,10 +163,24 @@ cargo run --release -- my-file.docx      # 📂 open a document
 cargo test                               # 🧪 unit + layout-fidelity tests
 ```
 
+Convert files from the command line with the editor's own import, layout and export:
+
+```bash
+rusty-document-writer-convert report.docx report.pdf            # 📄 PDF, exactly as laid out
+rusty-document-writer-convert --to docx *.doc *.odt *.rtf       # 📥 batch-convert to .docx (LibreOffice)
+rusty-document-writer-convert notes.docx notes.txt --dpi 200    # also .png pages, .odt, .doc, .rtf, .html
+```
+
 Render pages to PNG without a window, which is handy for comparing against a reference renderer:
 
 ```bash
 cargo run --release --bin rusty-document-writer-render -- my-file.docx out_dir --dpi 110
+```
+
+Check that documents survive a save unchanged, and time each stage:
+
+```bash
+cargo run --release --example io_check -- *.docx
 ```
 
 🤖 **CI:** `.github/workflows/release.yml` builds all six targets on GitHub's runners. Trigger it from **Actions → Release → Run workflow**, or push a `v*` tag to publish a release.
@@ -171,7 +192,9 @@ cargo run --release --bin rusty-document-writer-render -- my-file.docx out_dir -
 ```
 src/
 ├── 🧩 xml.rs        lossless XML DOM, tailored to OOXML
-├── 📦 opc.rs        zip package; untouched parts saved byte-for-byte
+├── 📦 opc.rs        zip package; untouched parts copied still compressed
+├── 🔄 convert.rs    format detection; .doc/.odt/.rtf… through LibreOffice
+├── 🖨️ pdf.rs        PDF export of the rendered pages
 ├── 🌳 model.rs      editable paragraphs / runs / tables
 ├── 🎨 props.rs      the DOCX formatting cascade, themes, numbering
 ├── 📄 document.rs   load · save · new (modern Normal template)
@@ -193,10 +216,12 @@ src/
 - [ ] 🌍 Complex scripts (Arabic, Hebrew, Indic) via shaping + BiDi
 - [ ] 📋 Rich clipboard (paste with formatting)
 - [ ] 💬 Comments & track-changes UI
-- [ ] 🖨️ PDF export & printing
+- [ ] 🖨️ Printing, and PDFs with selectable text (embedded fonts)
 - [ ] ⚡ Incremental layout for huge documents
 - [ ] 🧮 Table editing (rows, columns, resizing)
 - [ ] 📊 Charts, SmartArt & equations rendering
+- [ ] 🌀 WordArt text warps (arch, wave, circle) and 3D rotation
+- [ ] 📌 Floating shapes & pictures (drag to move, wrap text)
 - [ ] 🇬🇷 Localization, starting with Greek
 
 ---

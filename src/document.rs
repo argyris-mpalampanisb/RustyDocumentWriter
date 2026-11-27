@@ -1,5 +1,6 @@
 //! A loaded DOCX: package + parsed main document, styles, numbering, theme.
 
+use crate::convert;
 use crate::model::{self, Block, Paragraph};
 use crate::opc::{self, Package};
 use crate::props::{Numbering, Resolver, SectionProps, Settings, Styles, Theme, ThemeCtx};
@@ -37,15 +38,52 @@ pub struct Document {
     pub header_footers: HashMap<String, HeaderFooter>,
     pub images: HashMap<String, Arc<Vec<u8>>>,
     pub path: Option<PathBuf>,
+    /// Name to show (and suggest when saving) for a document that has no path
+    /// yet, e.g. one imported from a .doc.
+    pub name_hint: Option<String>,
     pub warnings: Vec<String>,
 }
 
 impl Document {
+    /// Open a Word document (.docx, .docm, .dotx, .dotm).
     pub fn open(path: &std::path::Path) -> Result<Document, String> {
-        let pkg = Package::open(path)?;
-        let mut d = Self::from_package(pkg)?;
+        let bytes = std::fs::read(path).map_err(|e| format!("Cannot open {}: {}", path.display(), e))?;
+        let ext = path.extension().and_then(|e| e.to_str());
+        match convert::detect(&bytes, ext) {
+            convert::Format::Docx => {}
+            convert::Format::Encrypted => {
+                return Err("This document is password-protected. Remove the password in Word (File ▸ Info ▸ Protect Document) and open it again.".into());
+            }
+            f if f.convertible() => {
+                return Err(format!("{} is a {}, not a Word document; it has to be converted first (Document::import does that with LibreOffice).", path.display(), f.describe()));
+            }
+            f => return Err(format!("{} is a {}, not a Word document.", path.display(), f.describe())),
+        }
+        let mut d = Self::from_package(Package::from_bytes(bytes)?)?;
         d.path = Some(path.to_path_buf());
         Ok(d)
+    }
+
+    /// Open any supported document. Word files open directly; .doc, .odt, .rtf,
+    /// .html and .txt are converted through LibreOffice into an untitled .docx
+    /// (the original is never overwritten). Returns the format it came from.
+    pub fn import(path: &std::path::Path) -> Result<(Document, convert::Format), String> {
+        let head = {
+            use std::io::Read;
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut f = std::fs::File::open(path).map_err(|e| format!("Cannot open {}: {}", path.display(), e))?;
+            let n = f.read(&mut buf).map_err(|e| e.to_string())?;
+            buf.truncate(n);
+            buf
+        };
+        let format = convert::detect(&head, path.extension().and_then(|e| e.to_str()));
+        if !format.convertible() {
+            return Self::open(path).map(|d| (d, format));
+        }
+        let docx = convert::to_docx(path)?;
+        let mut d = Self::from_package(Package::from_bytes(docx)?)?;
+        d.name_hint = path.file_stem().map(|s| s.to_string_lossy().to_string());
+        Ok((d, format))
     }
 
     pub fn new_blank() -> Document {
@@ -125,8 +163,8 @@ impl Document {
                         for hr in &hrels {
                             if hr.rel_type == opc::REL_IMAGE && !hr.external {
                                 let p = Package::resolve_target(&target, &hr.target);
-                                if let Some(b) = package.get(&p) {
-                                    images.insert(p, Arc::new(b.to_vec()));
+                                if let Some(b) = package.get_shared(&p) {
+                                    images.insert(p, b);
                                 }
                             }
                         }
@@ -137,8 +175,8 @@ impl Document {
                     }
                 }
                 "image" => {
-                    if let Some(b) = package.get(&target) {
-                        images.insert(target.clone(), Arc::new(b.to_vec()));
+                    if let Some(b) = package.get_shared(&target) {
+                        images.insert(target.clone(), b);
                     }
                 }
                 _ => {}
@@ -164,6 +202,7 @@ impl Document {
             header_footers,
             images,
             path: None,
+            name_hint: None,
             warnings,
         })
     }
@@ -229,7 +268,15 @@ impl Document {
     }
 
     pub fn save_as(&mut self, path: &std::path::Path) -> Result<(), String> {
-        let pkg = self.to_package();
+        let mut pkg = self.to_package();
+        // The extension decides the package kind: a template opened and saved as
+        // .docx must stop declaring itself a template, or Word refuses to open it.
+        if let Some(kind) = path.extension().and_then(|e| e.to_str()).and_then(convert::Kind::from_ext) {
+            pkg.set_override_content_type(&self.main_part, kind.content_type());
+            if !kind.allows_macros() {
+                pkg.remove_macros(&self.main_part);
+            }
+        }
         pkg.save(path)?;
         self.package = pkg;
         for hf in self.header_footers.values_mut() {
@@ -349,11 +396,17 @@ impl Document {
         }
     }
 
+    /// Does the package carry a VBA project?
+    pub fn has_macros(&self) -> bool {
+        self.package.rels(&self.main_part).iter().any(|r| r.rel_type.ends_with("/vbaProject"))
+    }
+
     pub fn title(&self) -> String {
         self.path
             .as_ref()
             .and_then(|p| p.file_stem())
             .map(|s| s.to_string_lossy().to_string())
+            .or_else(|| self.name_hint.clone())
             .unwrap_or_else(|| "Document1".to_string())
     }
 

@@ -3,7 +3,7 @@
 use super::icons::{self, Icon};
 use super::theme::{self, *};
 use super::{App, Cmd, Tab};
-use egui::{pos2, vec2, Align2, Color32, CornerRadius, CursorIcon, Id, Rect, Response, Sense, Stroke, StrokeKind, Ui};
+use egui::{pos2, vec2, Align2, Popup, Color32, CornerRadius, CursorIcon, Id, Rect, Response, Sense, Stroke, StrokeKind, Ui};
 use rusty_document_writer::props::Align;
 
 const TITLE_H: f32 = 40.0;
@@ -21,14 +21,14 @@ fn paint_bg(ui: &Ui, r: &Response, rect: Rect, checked: bool, enabled: bool) {
         return;
     }
     if r.is_pointer_button_down_on() {
-        p.rect_filled(rect, 4.0, PRESSED);
+        p.rect_filled(rect, 4.0, pal().pressed);
     } else if r.hovered() {
-        p.rect_filled(rect, 4.0, HOVER);
+        p.rect_filled(rect, 4.0, pal().hover);
     } else if checked {
-        p.rect_filled(rect, 4.0, CHECKED);
+        p.rect_filled(rect, 4.0, pal().checked);
     }
     if checked {
-        p.rect_stroke(rect, 4.0, Stroke::new(1.0, Color32::from_gray(0x70)), StrokeKind::Inside);
+        p.rect_stroke(rect, 4.0, Stroke::new(1.0, pal().border()), StrokeKind::Inside);
     }
 }
 
@@ -38,7 +38,7 @@ fn chevron(ui: &Ui, center: egui::Pos2, color: Color32) {
 }
 
 fn text_width(ui: &Ui, text: &str, size: f32) -> f32 {
-    ui.painter().layout_no_wrap(text.to_string(), theme::ui_font(size), TEXT).size().x
+    ui.painter().layout_no_wrap(text.to_string(), theme::ui_font(size), pal().text).size().x
 }
 
 /// Large ribbon button: 32px icon above a (possibly two-line) label.
@@ -48,10 +48,10 @@ pub fn big(ui: &mut Ui, icon: Icon, label: &str, dropdown: bool, enabled: bool) 
     let w = (tw + 10.0).max(46.0);
     let (rect, r) = ui.allocate_exact_size(vec2(w, CONTENT_H), Sense::click());
     paint_bg(ui, &r, rect, false, enabled);
-    let fg = if enabled { ICON } else { TEXT_DISABLED };
+    let fg = if enabled { pal().icon } else { pal().text_disabled };
     let ir = Rect::from_center_size(pos2(rect.center().x, rect.top() + 22.0), vec2(30.0, 30.0));
     icons::paint(ui.painter(), icon, ir, fg);
-    let tc = if enabled { TEXT } else { TEXT_DISABLED };
+    let tc = if enabled { pal().text } else { pal().text_disabled };
     let mut y = rect.top() + 46.0;
     for (i, l) in lines.iter().enumerate() {
         let last = i + 1 == lines.len();
@@ -75,9 +75,9 @@ pub fn small(ui: &mut Ui, icon: Icon, label: &str, dropdown: bool, enabled: bool
     let w = 28.0 + tw + if dropdown { 14.0 } else { 6.0 };
     let (rect, r) = ui.allocate_exact_size(vec2(w, 24.0), Sense::click());
     paint_bg(ui, &r, rect, false, enabled);
-    let fg = if enabled { ICON } else { TEXT_DISABLED };
+    let fg = if enabled { pal().icon } else { pal().text_disabled };
     icons::paint(ui.painter(), icon, Rect::from_center_size(pos2(rect.left() + 13.0, rect.center().y), vec2(16.0, 16.0)), fg);
-    let tc = if enabled { TEXT } else { TEXT_DISABLED };
+    let tc = if enabled { pal().text } else { pal().text_disabled };
     ui.painter().text(pos2(rect.left() + 26.0, rect.center().y), Align2::LEFT_CENTER, label, theme::ui_font(12.5), tc);
     if dropdown {
         chevron(ui, pos2(rect.right() - 8.0, rect.center().y), tc);
@@ -91,9 +91,9 @@ pub fn icon_btn(ui: &mut Ui, icon: Icon, tip: &str, checked: bool, dropdown: boo
     let (rect, r) = ui.allocate_exact_size(vec2(w, 24.0), Sense::click());
     paint_bg(ui, &r, rect, checked, true);
     let ir = Rect::from_center_size(pos2(rect.left() + 13.0, rect.center().y), vec2(16.0, 16.0));
-    icons::paint(ui.painter(), icon, ir, ICON);
+    icons::paint(ui.painter(), icon, ir, pal().icon);
     if dropdown {
-        chevron(ui, pos2(rect.right() - 6.0, rect.center().y), ICON);
+        chevron(ui, pos2(rect.right() - 6.0, rect.center().y), pal().icon);
     }
     r.on_hover_text(tip)
 }
@@ -107,12 +107,12 @@ fn group(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui)) {
         });
         let w = inner.response.rect.width().max(text_width(ui, label, 11.5) + 8.0);
         let (lr, _) = ui.allocate_exact_size(vec2(w, LABEL_H), Sense::hover());
-        ui.painter().text(lr.center(), Align2::CENTER_CENTER, label, theme::ui_font(11.5), TEXT_DIM);
+        ui.painter().text(lr.center(), Align2::CENTER_CENTER, label, theme::ui_font(11.5), pal().text_dim);
     });
     let rect = r.response.rect;
     ui.add_space(5.0);
     let x = ui.cursor().left();
-    ui.painter().vline(x, (rect.top() + 4.0)..=(rect.bottom() - 4.0), Stroke::new(1.0, SEP));
+    ui.painter().vline(x, (rect.top() + 4.0)..=(rect.bottom() - 4.0), Stroke::new(1.0, pal().sep));
     ui.add_space(6.0);
 }
 
@@ -141,12 +141,12 @@ fn menu_item(ui: &mut Ui, text: &str) -> bool {
 fn window_button(ui: &mut Ui, rect: Rect, glyph: &str, fallback: &str, close: bool, icon_font: bool) -> Response {
     let r = ui.interact(rect, Id::NULL.with(("winbtn", glyph)), Sense::click());
     if r.hovered() {
-        ui.painter().rect_filled(rect, 0.0, if close { Color32::from_rgb(0xC4, 0x2B, 0x1C) } else { HOVER });
+        ui.painter().rect_filled(rect, 0.0, if close { Color32::from_rgb(0xC4, 0x2B, 0x1C) } else { pal().hover });
     }
     if icon_font {
-        ui.painter().text(rect.center(), Align2::CENTER_CENTER, glyph, theme::icon_font(10.0), TEXT);
+        ui.painter().text(rect.center(), Align2::CENTER_CENTER, glyph, theme::icon_font(10.0), pal().text);
     } else {
-        ui.painter().text(rect.center(), Align2::CENTER_CENTER, fallback, theme::ui_font(14.0), TEXT);
+        ui.painter().text(rect.center(), Align2::CENTER_CENTER, fallback, theme::ui_font(14.0), pal().text);
     }
     r
 }
@@ -155,9 +155,9 @@ fn qat_button(ui: &mut Ui, x: f32, rect_y: f32, glyph: &str, fallback: Icon, ena
     let rect = Rect::from_min_size(pos2(x, rect_y), vec2(30.0, 30.0));
     let r = ui.interact(rect, Id::NULL.with(("qat", glyph)), Sense::click());
     if r.hovered() && enabled {
-        ui.painter().rect_filled(rect, 4.0, HOVER);
+        ui.painter().rect_filled(rect, 4.0, pal().hover);
     }
-    let c = if enabled { TEXT } else { TEXT_DISABLED };
+    let c = if enabled { pal().text } else { pal().text_disabled };
     if icon_font {
         ui.painter().text(rect.center(), Align2::CENTER_CENTER, glyph, theme::icon_font(15.0), c);
     } else {
@@ -178,7 +178,7 @@ pub fn window_chrome(app: &mut App, ui: &mut Ui, title: &str, cmds: &mut Vec<Cmd
         ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
     }
     let p = ui.painter().clone();
-    p.rect_filled(bar, 0.0, BG);
+    p.rect_filled(bar, 0.0, pal().bg);
     // App logo: a stylised "R" page.
     let logo = Rect::from_min_size(pos2(bar.left() + 14.0, bar.center().y - 9.0), vec2(18.0, 18.0));
     p.rect_filled(logo, 3.0, Color32::from_rgb(0x6B, 0x4F, 0xD8));
@@ -186,12 +186,12 @@ pub fn window_chrome(app: &mut App, ui: &mut Ui, title: &str, cmds: &mut Vec<Cmd
     p.text(logo.center(), Align2::CENTER_CENTER, "R", theme::bold_font(12.0), Color32::WHITE);
 
     let mut x = logo.right() + 14.0;
-    p.text(pos2(x, bar.center().y), Align2::LEFT_CENTER, "AutoSave", theme::ui_font(13.0), TEXT);
+    p.text(pos2(x, bar.center().y), Align2::LEFT_CENTER, "AutoSave", theme::ui_font(13.0), pal().text);
     x += text_width(ui, "AutoSave", 13.0) + 8.0;
     // AutoSave toggle (off: requires cloud storage).
     let tr = Rect::from_min_size(pos2(x, bar.center().y - 10.0), vec2(40.0, 20.0));
-    p.rect_stroke(tr, 10.0, Stroke::new(1.0, TEXT), StrokeKind::Inside);
-    p.circle_filled(pos2(tr.left() + 10.0, tr.center().y), 6.0, TEXT);
+    p.rect_stroke(tr, 10.0, Stroke::new(1.0, pal().text), StrokeKind::Inside);
+    p.circle_filled(pos2(tr.left() + 10.0, tr.center().y), 6.0, pal().text);
     ui.interact(tr, Id::NULL.with("autosave"), Sense::hover()).on_hover_text("AutoSave needs cloud storage — use Save (Ctrl+S)");
     x = tr.right() + 10.0;
     let y = bar.center().y - 15.0;
@@ -204,14 +204,14 @@ pub fn window_chrome(app: &mut App, ui: &mut Ui, title: &str, cmds: &mut Vec<Cmd
     if r.clicked() {
         cmds.push(Cmd::Undo);
     }
-    chevron(ui, pos2(nx + 2.0, bar.center().y), TEXT_DISABLED);
+    chevron(ui, pos2(nx + 2.0, bar.center().y), pal().text_disabled);
     let (r, nx) = qat_button(ui, nx + 8.0, y, "\u{E7A6}", Icon::Next, app.can_redo(), icf, "Redo (Ctrl+Y)");
     if r.clicked() {
         cmds.push(Cmd::Redo);
     }
-    chevron(ui, pos2(nx + 10.0, bar.center().y), TEXT);
+    chevron(ui, pos2(nx + 10.0, bar.center().y), pal().text);
     let title_x = nx + 34.0;
-    p.text(pos2(title_x, bar.center().y), Align2::LEFT_CENTER, title, theme::ui_font(13.0), TEXT);
+    p.text(pos2(title_x, bar.center().y), Align2::LEFT_CENTER, title, theme::ui_font(13.0), pal().text);
 
     // Search box (centred) — opens Find & Replace.
     let sw = (full.width() * 0.22).clamp(200.0, 430.0);
@@ -219,14 +219,14 @@ pub fn window_chrome(app: &mut App, ui: &mut Ui, title: &str, cmds: &mut Vec<Cmd
     let sr = Rect::from_min_size(pos2(sx, bar.center().y - 15.0), vec2(sw, 30.0));
     if sr.right() < full.right() - 160.0 {
         let resp = ui.interact(sr, Id::NULL.with("searchbox"), Sense::click());
-        p.rect_filled(sr, 6.0, Color32::from_rgb(0x1F, 0x1F, 0x1F));
-        p.rect_stroke(sr, 6.0, Stroke::new(1.0, if resp.hovered() { Color32::from_gray(0x8A) } else { Color32::from_gray(0x55) }), StrokeKind::Inside);
+        p.rect_filled(sr, 6.0, pal().field);
+        p.rect_stroke(sr, 6.0, Stroke::new(1.0, if resp.hovered() { pal().border() } else { pal().sep }), StrokeKind::Inside);
         if icf {
-            p.text(pos2(sr.left() + 18.0, sr.center().y), Align2::CENTER_CENTER, "\u{E721}", theme::icon_font(13.0), TEXT_DIM);
+            p.text(pos2(sr.left() + 18.0, sr.center().y), Align2::CENTER_CENTER, "\u{E721}", theme::icon_font(13.0), pal().text_dim);
         } else {
-            icons::paint(&p, Icon::Find, Rect::from_center_size(pos2(sr.left() + 18.0, sr.center().y), vec2(14.0, 14.0)), TEXT_DIM);
+            icons::paint(&p, Icon::Find, Rect::from_center_size(pos2(sr.left() + 18.0, sr.center().y), vec2(14.0, 14.0)), pal().text_dim);
         }
-        p.text(pos2(sr.left() + 36.0, sr.center().y), Align2::LEFT_CENTER, "Search", theme::ui_font(13.0), TEXT_DIM);
+        p.text(pos2(sr.left() + 36.0, sr.center().y), Align2::LEFT_CENTER, "Search", theme::ui_font(13.0), pal().text_dim);
         if resp.clicked() {
             cmds.push(Cmd::Find);
         }
@@ -290,17 +290,17 @@ pub fn tabs_row(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
     let mut x = row.left() + 6.0;
     let mut draw_tab = |ui: &mut Ui, label: &str, selected: bool| -> Response {
         let font = if selected { theme::bold_font(13.5) } else { theme::ui_font(13.5) };
-        let w = p.layout_no_wrap(label.to_string(), font.clone(), TEXT).size().x + 16.0;
+        let w = p.layout_no_wrap(label.to_string(), font.clone(), pal().text).size().x + 16.0;
         let rect = Rect::from_min_size(pos2(x, row.top() + 2.0), vec2(w, TABS_H - 4.0));
         x += w + 4.0;
         let r = ui.interact(rect, Id::NULL.with(("tab", label)), Sense::click());
         if r.hovered() && !selected {
-            p.rect_filled(rect, 4.0, Color32::from_rgb(0x26, 0x26, 0x26));
+            p.rect_filled(rect, 4.0, pal().hover);
         }
-        p.text(rect.center(), Align2::CENTER_CENTER, label, font, TEXT);
+        p.text(rect.center(), Align2::CENTER_CENTER, label, font, pal().text);
         if selected {
-            let tw = p.layout_no_wrap(label.to_string(), theme::bold_font(13.5), TEXT).size().x;
-            p.rect_filled(Rect::from_center_size(pos2(rect.center().x, rect.bottom() - 2.0), vec2(tw, 2.5)), 1.0, TEXT);
+            let tw = p.layout_no_wrap(label.to_string(), theme::bold_font(13.5), pal().text).size().x;
+            p.rect_filled(Rect::from_center_size(pos2(rect.center().x, rect.bottom() - 2.0), vec2(tw, 2.5)), 1.0, pal().text);
         }
         r
     };
@@ -317,7 +317,7 @@ pub fn tabs_row(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
     let sw = text_width(ui, label, 13.0) + 44.0;
     let sr = Rect::from_min_size(pos2(row.right() - sw - 12.0, row.top() + 3.0), vec2(sw, TABS_H - 6.0));
     let r = ui.interact(sr, Id::NULL.with("share"), Sense::click());
-    p.rect_filled(sr, 4.0, if r.hovered() { Color32::from_rgb(0x3A, 0x96, 0xDD) } else { ACCENT });
+    p.rect_filled(sr, 4.0, if r.hovered() { pal().accent.lerp_to_gamma(Color32::WHITE, 0.12) } else { pal().accent });
     icons::paint(&p, Icon::Share, Rect::from_center_size(pos2(sr.left() + 15.0, sr.center().y), vec2(14.0, 14.0)), Color32::WHITE);
     p.text(pos2(sr.left() + 28.0, sr.center().y), Align2::LEFT_CENTER, label, theme::ui_font(13.0), Color32::WHITE);
     if r.on_hover_text("Save a copy to share").clicked() {
@@ -333,7 +333,7 @@ pub fn ribbon(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
     let h = CONTENT_H + LABEL_H + 10.0;
     let (outer, _) = ui.allocate_exact_size(vec2(full.width(), h + 8.0), Sense::hover());
     let panel = Rect::from_min_max(pos2(outer.left() + 10.0, outer.top() + 2.0), pos2(outer.right() - 10.0, outer.bottom() - 6.0));
-    ui.painter().rect_filled(panel, 8.0, RIBBON);
+    ui.painter().rect_filled(panel, 8.0, pal().ribbon);
     let inner = panel.shrink2(vec2(10.0, 4.0));
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Min)));
     child.set_clip_rect(panel);
@@ -349,7 +349,7 @@ pub fn ribbon(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
         Tab::Help => help(&mut child, cmds),
     }
     // Collapse chevron (decorative).
-    chevron(ui, pos2(panel.right() - 14.0, panel.bottom() - 12.0), TEXT_DIM);
+    chevron(ui, pos2(panel.right() - 14.0, panel.bottom() - 12.0), pal().text_dim);
 }
 
 const THEME_COLORS: [[&str; 10]; 1] = [["FFFFFF", "000000", "E8E8E8", "0E2841", "156082", "E97132", "196B24", "0F9ED5", "A02B93", "4EA72E"]];
@@ -360,7 +360,7 @@ fn color_grid(ui: &mut Ui, automatic: &str) -> Option<Option<String>> {
     if menu_item(ui, automatic) {
         out = Some(None);
     }
-    ui.label(egui::RichText::new("Theme Colors").small().color(TEXT_DIM));
+    ui.label(egui::RichText::new("Theme Colors").small().color(pal().text_dim));
     for row in THEME_COLORS {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 3.0;
@@ -383,7 +383,7 @@ fn color_grid(ui: &mut Ui, automatic: &str) -> Option<Option<String>> {
             }
         });
     }
-    ui.label(egui::RichText::new("Standard Colors").small().color(TEXT_DIM));
+    ui.label(egui::RichText::new("Standard Colors").small().color(pal().text_dim));
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 3.0;
         for hex in STD_COLORS {
@@ -395,11 +395,278 @@ fn color_grid(ui: &mut Ui, automatic: &str) -> Option<Option<String>> {
     out
 }
 
+// ---------------------------------------------------------------------------
+// Underline styles & text effects
+
+const UNDERLINES: [(&str, &str); 11] = [
+    ("single", "Single"),
+    ("words", "Words only"),
+    ("double", "Double"),
+    ("thick", "Thick"),
+    ("dotted", "Dotted"),
+    ("dash", "Dashed"),
+    ("dotDash", "Dot-dash"),
+    ("dotDotDash", "Dot-dot-dash"),
+    ("wave", "Wave"),
+    ("wavyHeavy", "Heavy wave"),
+    ("wavyDouble", "Double wave"),
+];
+
+/// Paint an underline (or strike) sample of `style` from `x0` to `x1` at height `y`.
+fn paint_line_style(p: &egui::Painter, x0: f32, x1: f32, y: f32, style: &str, color: Color32) {
+    let st = |w: f32| Stroke::new(w, color);
+    match style {
+        "double" => {
+            p.hline(x0..=x1, y - 1.5, st(1.0));
+            p.hline(x0..=x1, y + 1.5, st(1.0));
+        }
+        "thick" => {
+            p.hline(x0..=x1, y, st(2.5));
+        }
+        "dotted" | "dash" | "dotDash" | "dotDotDash" => {
+            let pattern: &[f32] = match style {
+                "dotted" => &[1.5, 2.0],
+                "dash" => &[5.0, 3.0],
+                "dotDash" => &[5.0, 2.5, 1.5, 2.5],
+                _ => &[5.0, 2.0, 1.5, 2.0, 1.5, 2.0],
+            };
+            let (mut x, mut i) = (x0, 0);
+            while x < x1 {
+                if i % 2 == 0 {
+                    p.hline(x..=(x + pattern[i % pattern.len()]).min(x1), y, st(1.2));
+                }
+                x += pattern[i % pattern.len()];
+                i += 1;
+            }
+        }
+        "wave" | "wavyHeavy" | "wavyDouble" => {
+            let rows: &[f32] = if style == "wavyDouble" { &[-2.0, 2.0] } else { &[0.0] };
+            for dy in rows {
+                let pts: Vec<egui::Pos2> = (0..=((x1 - x0) as usize)).map(|i| pos2(x0 + i as f32, y + dy + 1.5 * (i as f32 * 0.9).sin())).collect();
+                p.add(egui::Shape::line(pts, st(if style == "wavyHeavy" { 2.0 } else { 1.0 })));
+            }
+        }
+        "words" => {
+            for (a, b) in [(0.0, 0.3), (0.4, 0.65), (0.75, 1.0)] {
+                p.hline((x0 + (x1 - x0) * a)..=(x0 + (x1 - x0) * b), y, st(1.0));
+            }
+        }
+        _ => {
+            p.hline(x0..=x1, y, st(1.0));
+        }
+    }
+}
+
+fn underline_menu(ui: &mut Ui, current: Option<&str>, cmds: &mut Vec<Cmd>) {
+    for (val, label) in UNDERLINES {
+        let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
+        let sel = current == Some(val);
+        if sel || r.hovered() {
+            ui.painter().rect_filled(rect, 3.0, if sel { pal().checked } else { pal().hover });
+        }
+        let p = ui.painter();
+        paint_line_style(p, rect.left() + 10.0, rect.left() + 80.0, rect.center().y + 3.0, val, pal().text);
+        p.text(pos2(rect.left() + 94.0, rect.center().y), Align2::LEFT_CENTER, label, theme::ui_font(13.0), pal().text);
+        if r.clicked() {
+            cmds.push(Cmd::UnderlineStyle(val));
+            ui.close();
+        }
+    }
+    ui.separator();
+    ui.label(egui::RichText::new("Underline Color").small().color(pal().text_dim));
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 3.0;
+        for hex in ["000000", "0E2841", "156082", "E97132", "196B24"].iter().chain(STD_COLORS.iter()) {
+            if swatch(ui, hex) {
+                cmds.push(Cmd::UnderlineColor(Some(hex.to_string())));
+                ui.close();
+            }
+        }
+    });
+    if menu_item(ui, "Automatic Color") {
+        cmds.push(Cmd::UnderlineColor(None));
+    }
+    if menu_item(ui, "No Underline") {
+        cmds.push(Cmd::UnderlineStyle("none"));
+    }
+}
+
+fn hex32(hex: &str) -> Color32 {
+    let c = rusty_document_writer::props::Color::from_hex(hex).unwrap_or(rusty_document_writer::props::Color::BLACK);
+    Color32::from_rgb(c.0, c.1, c.2)
+}
+
+/// A gallery tile previewing a text theme with the egui painter (an approximation of the page rendering).
+fn theme_tile(ui: &mut Ui, t: &rusty_document_writer::texttheme::TextTheme) -> bool {
+    let (rect, r) = ui.allocate_exact_size(vec2(96.0, 58.0), Sense::click());
+    let p = ui.painter();
+    p.rect_filled(rect, 3.0, Color32::WHITE);
+    if r.hovered() {
+        p.rect_stroke(rect, 3.0, Stroke::new(2.0, pal().accent), StrokeKind::Outside);
+    }
+    let text = if t.caps { "ABC" } else if t.small_caps { "Aʙᴄ" } else { "Abc" };
+    let font = if t.bold { theme::bold_font(22.0) } else { theme::ui_font(22.0) };
+    let col = hex32(t.color);
+    let c = pos2(rect.center().x, rect.top() + 22.0);
+    let size = p.layout_no_wrap(text.to_string(), font.clone(), col).size();
+    let tr = Rect::from_center_size(c, size);
+    if let Some(h) = t.highlight.and_then(rusty_document_writer::props::highlight_color) {
+        p.rect_filled(tr.expand2(vec2(5.0, 0.0)), 0.0, Color32::from_rgb(h.0, h.1, h.2));
+    }
+    let bg = t.highlight.and_then(rusty_document_writer::props::highlight_color).map(|h| Color32::from_rgb(h.0, h.1, h.2)).unwrap_or(Color32::WHITE);
+    let draw = |off: egui::Vec2, color: Color32| {
+        p.text(c + off, Align2::CENTER_CENTER, text, font.clone(), color);
+    };
+    if t.emboss || t.imprint {
+        let s = if t.emboss { 1.2 } else { -1.2 };
+        draw(vec2(s, s), Color32::from_gray(0x50));
+        draw(vec2(-s, -s), Color32::WHITE);
+        draw(vec2(0.0, 0.0), col.lerp_to_gamma(Color32::WHITE, 0.72));
+    } else {
+        if t.shadow {
+            draw(vec2(1.6, 1.6), Color32::from_gray(0xA0));
+        }
+        if t.outline {
+            for (dx, dy) in [(-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0), (-0.7, -0.7), (0.7, 0.7), (-0.7, 0.7), (0.7, -0.7)] {
+                draw(vec2(dx, dy), col);
+            }
+            draw(vec2(0.0, 0.0), bg);
+        } else {
+            draw(vec2(0.0, 0.0), col);
+        }
+    }
+    if let Some(u) = t.underline {
+        paint_line_style(p, tr.left(), tr.right(), tr.bottom() - 1.0, u, t.underline_color.map(hex32).unwrap_or(col));
+    }
+    if t.strike || t.dstrike {
+        paint_line_style(p, tr.left(), tr.right(), tr.center().y + 1.0, if t.dstrike { "double" } else { "single" }, col);
+    }
+    p.text(pos2(rect.center().x, rect.bottom() - 9.0), Align2::CENTER_CENTER, t.name, theme::ui_font(11.0), Color32::from_gray(0x40));
+    r.on_hover_text(t.name).clicked()
+}
+
+fn text_effects_menu(ui: &mut Ui, tb: &super::Toolbar, cmds: &mut Vec<Cmd>) {
+    use rusty_document_writer::texttheme::THEMES;
+    ui.set_min_width(310.0);
+    ui.label(egui::RichText::new("Text Themes").small().color(pal().text_dim));
+    egui::Grid::new("text-themes").spacing([4.0, 4.0]).show(ui, |ui| {
+        for (i, t) in THEMES.iter().enumerate() {
+            if theme_tile(ui, t) {
+                cmds.push(Cmd::TextTheme(i));
+                ui.close();
+            }
+            if i % 3 == 2 {
+                ui.end_row();
+            }
+        }
+    });
+    ui.separator();
+    ui.label(egui::RichText::new("Effects").small().color(pal().text_dim));
+    for (name, label, on) in [
+        ("w:outline", "Outline", tb.outline),
+        ("w:shadow", "Shadow", tb.shadow),
+        ("w:emboss", "Emboss", tb.emboss),
+        ("w:imprint", "Engrave", tb.imprint),
+        ("w:smallCaps", "Small Caps    Ctrl+Shift+K", tb.small_caps),
+        ("w:caps", "All Caps    Ctrl+Shift+A", tb.caps),
+        ("w:dstrike", "Double Strikethrough", tb.dstrike),
+    ] {
+        if ui.add(egui::Button::selectable(on, format!("{}  {label}", if on { "✔" } else { "   " })).frame(false).min_size(vec2(ui.available_width(), 24.0))).clicked() {
+            cmds.push(Cmd::Effect(name));
+        }
+    }
+    ui.separator();
+    if menu_item(ui, "Remove Text Effects") {
+        cmds.push(Cmd::ClearEffects);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 3D shape library
+
+const SHAPE_COLORS: [&str; 12] = ["156082", "0F9ED5", "196B24", "4EA72E", "E97132", "FFC000", "C00000", "A02B93", "7030A0", "0E2841", "404040", "FFFFFF"];
+
+/// (Re)build the gallery thumbnails when the library is first shown or the shape colour changes.
+fn ensure_shape_thumbs(app: &mut App, ctx: &egui::Context) {
+    use rusty_document_writer::shapes::{tint_rgba, SHAPES};
+    if app.shape_thumbs.as_ref().is_some_and(|(c, _)| *c == app.shape_color) {
+        return;
+    }
+    let color = app.shape_color.as_deref().and_then(rusty_document_writer::props::Color::from_hex);
+    let thumbs = SHAPES
+        .iter()
+        .filter_map(|s| {
+            let img = image::load_from_memory(s.png).ok()?.thumbnail(112, 112);
+            let mut rgba = img.to_rgba8();
+            if let Some(c) = color {
+                tint_rgba(&mut rgba, c);
+            }
+            let ci = egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], &rgba);
+            Some(ctx.load_texture(format!("shape-{}", s.id), ci, egui::TextureOptions::LINEAR))
+        })
+        .collect();
+    app.shape_thumbs = Some((app.shape_color.clone(), thumbs));
+}
+
+fn shapes_menu(ui: &mut Ui, app: &App, cmds: &mut Vec<Cmd>) {
+    use rusty_document_writer::shapes::SHAPES;
+    ui.set_min_width(400.0);
+    ui.label(egui::RichText::new("3D Shapes").small().color(pal().text_dim));
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 3.0;
+        // "Silver": the neutral render, untinted.
+        let silver = color_chip(ui, Color32::from_gray(0xA6), app.shape_color.is_none()).on_hover_text("Silver");
+        if silver.clicked() {
+            cmds.push(Cmd::ShapeColor(None));
+        }
+        for hex in SHAPE_COLORS {
+            if color_chip(ui, hex32(hex), app.shape_color.as_deref() == Some(hex)).clicked() {
+                cmds.push(Cmd::ShapeColor(Some(hex.to_string())));
+            }
+        }
+    });
+    ui.add_space(4.0);
+    let Some((_, thumbs)) = &app.shape_thumbs else { return };
+    egui::Grid::new("shape-gallery").spacing([4.0, 4.0]).show(ui, |ui| {
+        for (i, (shape, tex)) in SHAPES.iter().zip(thumbs).enumerate() {
+            let (rect, r) = ui.allocate_exact_size(vec2(62.0, 62.0), Sense::click());
+            let p = ui.painter();
+            p.rect_filled(rect, 4.0, if r.hovered() { Color32::from_gray(0xF4) } else { Color32::WHITE });
+            if r.hovered() {
+                p.rect_stroke(rect, 4.0, Stroke::new(2.0, pal().accent), StrokeKind::Outside);
+            }
+            let sz = tex.size_vec2();
+            let k = 54.0 / sz.x.max(sz.y);
+            p.image(tex.id(), Rect::from_center_size(rect.center(), sz * k), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+            if r.on_hover_text(shape.name).clicked() {
+                cmds.push(Cmd::InsertShape(i));
+                ui.close();
+            }
+            if i % 6 == 5 {
+                ui.end_row();
+            }
+        }
+    });
+    ui.add_space(2.0);
+    ui.label(egui::RichText::new("Shapes are inserted as pictures, so they look the same in any word processor.").small().color(pal().text_dim));
+}
+
+fn color_chip(ui: &mut Ui, c: Color32, selected: bool) -> Response {
+    let (rect, r) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
+    let p = ui.painter();
+    p.circle_filled(rect.center(), 8.0, c);
+    p.circle_stroke(rect.center(), 8.0, Stroke::new(0.8, Color32::from_gray(0x70)));
+    if selected || r.hovered() {
+        p.circle_stroke(rect.center(), 10.0, Stroke::new(1.6, if selected { pal().text } else { pal().accent }));
+    }
+    r
+}
+
 fn swatch(ui: &mut Ui, hex: &str) -> bool {
     let c = rusty_document_writer::props::Color::from_hex(hex).unwrap_or(rusty_document_writer::props::Color::BLACK);
     let (rect, r) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::click());
     ui.painter().rect_filled(rect, 0.0, Color32::from_rgb(c.0, c.1, c.2));
-    ui.painter().rect_stroke(rect, 0.0, Stroke::new(if r.hovered() { 2.0 } else { 0.5 }, if r.hovered() { ACCENT_TEXT } else { Color32::from_gray(0x60) }), StrokeKind::Inside);
+    ui.painter().rect_stroke(rect, 0.0, Stroke::new(if r.hovered() { 2.0 } else { 0.5 }, if r.hovered() { pal().accent_text } else { Color32::from_gray(0x60) }), StrokeKind::Inside);
     r.on_hover_text(format!("#{hex}")).clicked()
 }
 
@@ -474,9 +741,16 @@ fn home(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
                 if icon_btn(ui, Icon::Italic, "Italic (Ctrl+I)", app.tb.italic, false).clicked() {
                     cmds.push(Cmd::Toggle("w:i"));
                 }
-                if icon_btn(ui, Icon::Underline, "Underline (Ctrl+U)", app.tb.underline, true).clicked() {
+                // Split button: the icon toggles the underline, the chevron opens the style menu.
+                let r = icon_btn(ui, Icon::Underline, "Underline (Ctrl+U)", app.tb.underline, true);
+                let on_chevron = r.interact_pointer_pos().or(r.hover_pos()).is_some_and(|p| p.x > r.rect.right() - 12.0);
+                if r.clicked() && !on_chevron {
                     cmds.push(Cmd::Underline);
                 }
+                egui::Popup::from_response(&r).open_memory((r.clicked() && on_chevron).then_some(egui::SetOpenCommand::Toggle)).show(|ui| {
+                    ui.set_min_width(200.0);
+                    underline_menu(ui, app.tb.underline_style.as_deref(), cmds);
+                });
                 if icon_btn(ui, Icon::Strike, "Strikethrough", app.tb.strike, false).clicked() {
                     cmds.push(Cmd::Toggle("w:strike"));
                 }
@@ -487,10 +761,10 @@ fn home(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
                     cmds.push(Cmd::VertAlign("superscript"));
                 }
                 ui.add_space(4.0);
-                let r = icon_btn(ui, Icon::TextEffects, "Text Effects", false, true);
-                if r.clicked() {
-                    cmds.push(Cmd::Unsupported("Text Effects and Typography"));
-                }
+                let tb = &app.tb;
+                let any_fx = tb.outline || tb.shadow || tb.emboss || tb.imprint;
+                let r = icon_btn(ui, Icon::TextEffects, "Text Effects and Themes", any_fx, true);
+                popup(&r, |ui| text_effects_menu(ui, tb, cmds));
                 let r = icon_btn(ui, Icon::Highlight, "Text Highlight Color", false, true);
                 popup(&r, |ui| {
                     let hl = ["yellow", "green", "cyan", "magenta", "blue", "red", "darkBlue", "darkCyan", "darkGreen", "darkMagenta", "darkRed", "darkYellow", "darkGray", "lightGray", "black"];
@@ -613,7 +887,7 @@ fn home(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
                     let p = ui.painter();
                     p.rect_filled(rect, 2.0, Color32::WHITE);
                     if sel || r.hovered() {
-                        p.rect_stroke(rect, 2.0, Stroke::new(2.0, if sel { Color32::from_gray(0x90) } else { ACCENT }), StrokeKind::Outside);
+                        p.rect_stroke(rect, 2.0, Stroke::new(2.0, if sel { Color32::from_gray(0x90) } else { pal().accent }), StrokeKind::Outside);
                     }
                     // Preview using the style's resolved formatting.
                     let rp = app.doc.resolver().run(id, None, None);
@@ -636,11 +910,11 @@ fn home(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
                 }
                 let (rect, r) = ui.allocate_exact_size(vec2(16.0, 54.0), Sense::click());
                 if r.hovered() {
-                    ui.painter().rect_filled(rect, 2.0, HOVER);
+                    ui.painter().rect_filled(rect, 2.0, pal().hover);
                 }
-                ui.painter().rect_stroke(rect, 2.0, Stroke::new(1.0, SEP), StrokeKind::Inside);
-                chevron(ui, rect.center() + vec2(0.0, 4.0), TEXT);
-                ui.painter().hline((rect.center().x - 3.0)..=(rect.center().x + 3.0), rect.center().y - 1.0, Stroke::new(1.0, TEXT));
+                ui.painter().rect_stroke(rect, 2.0, Stroke::new(1.0, pal().sep), StrokeKind::Inside);
+                chevron(ui, rect.center() + vec2(0.0, 4.0), pal().text);
+                ui.painter().hline((rect.center().x - 3.0)..=(rect.center().x + 3.0), rect.center().y - 1.0, Stroke::new(1.0, pal().text));
                 popup(&r, |ui| {
                     let mut all: Vec<(String, String)> = app
                         .doc
@@ -733,7 +1007,13 @@ fn insert(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
         if big(ui, Icon::Pictures, "Pictures", true, true).clicked() {
             cmds.push(Cmd::InsertPicture);
         }
-        for (ic, l) in [(Icon::Shapes, "Shapes"), (Icon::Icons3D, "Icons"), (Icon::SmartArt, "SmartArt"), (Icon::Chart, "Chart"), (Icon::Screenshot, "Screenshot")] {
+        let r = big(ui, Icon::Shapes, "Shapes", true, true);
+        if Popup::is_id_open(ui.ctx(), Popup::default_response_id(&r)) || r.clicked() {
+            ensure_shape_thumbs(app, ui.ctx());
+        }
+        // Stays open while picking a colour; choosing a shape closes it.
+        Popup::from_toggle_button_response(&r).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| shapes_menu(ui, app, cmds));
+        for (ic, l) in [(Icon::Icons3D, "Icons"), (Icon::SmartArt, "SmartArt"), (Icon::Chart, "Chart"), (Icon::Screenshot, "Screenshot")] {
             if big(ui, ic, l, matches!(ic, Icon::Shapes | Icon::Screenshot), false).clicked() {}
         }
     });
@@ -764,7 +1044,8 @@ fn insert(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
         if big(ui, Icon::TextBox, "Text\nBox", true, false).clicked() {}
         column(ui, |ui| {
             small(ui, Icon::QuickParts, "Quick Parts", true, false);
-            small(ui, Icon::WordArt, "WordArt", true, false);
+            let r = small(ui, Icon::WordArt, "WordArt", true, true);
+            super::wordart_ui::menu(app, ui, &r, cmds);
             small(ui, Icon::DropCap, "Drop Cap", true, false);
         });
         column(ui, |ui| {
@@ -818,7 +1099,7 @@ fn design(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
                     let p = ui.painter();
                     p.rect_filled(rect, 1.0, Color32::WHITE);
                     if r.hovered() || i == 0 {
-                        p.rect_stroke(rect, 1.0, Stroke::new(2.0, if i == 0 { Color32::from_gray(0x90) } else { ACCENT }), StrokeKind::Outside);
+                        p.rect_stroke(rect, 1.0, Stroke::new(2.0, if i == 0 { Color32::from_gray(0x90) } else { pal().accent }), StrokeKind::Outside);
                     }
                     let col = [Color32::BLACK, Color32::from_rgb(0x0F, 0x47, 0x61), Color32::from_rgb(0x15, 0x60, 0x82)][i as usize % 3];
                     p.text(rect.left_top() + vec2(6.0, 12.0), Align2::LEFT_CENTER, "Title", theme::ui_font(13.0), Color32::BLACK);
@@ -856,7 +1137,7 @@ fn design(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
 fn inch_spinner(ui: &mut Ui, label: &str, icon: Icon, value_pt: f32, on_change: impl FnOnce(f32)) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        icons::paint(ui.painter(), icon, Rect::from_min_size(ui.cursor().min + vec2(0.0, 4.0), vec2(16.0, 16.0)), ICON);
+        icons::paint(ui.painter(), icon, Rect::from_min_size(ui.cursor().min + vec2(0.0, 4.0), vec2(16.0, 16.0)), pal().icon);
         ui.add_space(18.0);
         ui.add_sized(vec2(56.0, 22.0), egui::Label::new(egui::RichText::new(label).size(12.5)));
         let mut v = (value_pt / 72.0 * 100.0).round() / 100.0;
@@ -870,7 +1151,7 @@ fn inch_spinner(ui: &mut Ui, label: &str, icon: Icon, value_pt: f32, on_change: 
 fn pt_spinner(ui: &mut Ui, label: &str, icon: Icon, value_pt: f32, on_change: impl FnOnce(f32)) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        icons::paint(ui.painter(), icon, Rect::from_min_size(ui.cursor().min + vec2(0.0, 4.0), vec2(16.0, 16.0)), ICON);
+        icons::paint(ui.painter(), icon, Rect::from_min_size(ui.cursor().min + vec2(0.0, 4.0), vec2(16.0, 16.0)), pal().icon);
         ui.add_space(18.0);
         ui.add_sized(vec2(44.0, 22.0), egui::Label::new(egui::RichText::new(label).size(12.5)));
         let mut v = value_pt;
@@ -1097,7 +1378,7 @@ fn view(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
     group(ui, "Views", |ui| {
         big(ui, Icon::ReadMode, "Read\nMode", false, false);
         let r = big(ui, Icon::PrintLayout, "Print\nLayout", false, true);
-        ui.painter().rect_stroke(r.rect, 4.0, Stroke::new(1.0, Color32::from_gray(0x70)), StrokeKind::Inside);
+        ui.painter().rect_stroke(r.rect, 4.0, Stroke::new(1.0, pal().border()), StrokeKind::Inside);
         big(ui, Icon::WebLayout, "Web\nLayout", false, false);
         column(ui, |ui| {
             small(ui, Icon::Outline, "Outline", false, false);
@@ -1108,6 +1389,38 @@ fn view(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
         if big(ui, Icon::DarkMode, "Switch\nModes", false, true).on_hover_text("Show the page in dark colours").clicked() {
             cmds.push(Cmd::DarkPage);
         }
+        let r = big(ui, Icon::Themes, "App\nTheme", true, true).on_hover_text("Colours for the ribbon and menus (also under File ▸ Theme)");
+        egui::Popup::from_toggle_button_response(&r).show(|ui| {
+            ui.set_min_width(220.0);
+            egui::ScrollArea::vertical().max_height(480.0).show(ui, |ui| {
+                for source in ["Word", "VS Code", "Zed"] {
+                    ui.label(egui::RichText::new(source).small().color(pal().text_dim));
+                    for (i, p) in theme::PALETTES.iter().enumerate().filter(|(_, p)| p.source == source) {
+                        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width().max(200.0), 24.0), Sense::click());
+                        let painter = ui.painter();
+                        if resp.hovered() {
+                            painter.rect_filled(rect, 3.0, pal().hover);
+                        }
+                        // Swatch: ribbon, canvas and accent of that theme.
+                        let sw = Rect::from_min_size(pos2(rect.left() + 6.0, rect.center().y - 7.0), vec2(30.0, 14.0));
+                        painter.rect_filled(sw, 2.0, p.ribbon);
+                        painter.rect_filled(Rect::from_min_max(pos2(sw.left() + 12.0, sw.top()), sw.right_bottom()), 0.0, p.canvas);
+                        painter.rect_filled(Rect::from_min_size(pos2(sw.right() - 8.0, sw.top() + 4.0), vec2(5.0, 6.0)), 1.0, p.accent);
+                        painter.rect_stroke(sw, 2.0, Stroke::new(1.0, pal().sep), StrokeKind::Outside);
+                        let on = i == theme::current();
+                        painter.text(pos2(sw.right() + 10.0, rect.center().y), Align2::LEFT_CENTER, p.name, theme::ui_font(13.0), if on { pal().accent_text } else { pal().text });
+                        if on {
+                            painter.text(pos2(rect.right() - 10.0, rect.center().y), Align2::RIGHT_CENTER, "✓", theme::ui_font(13.0), pal().accent_text);
+                        }
+                        if resp.clicked() {
+                            theme::set(ui.ctx(), i);
+                            theme::save();
+                        }
+                    }
+                    ui.add_space(4.0);
+                }
+            });
+        });
     });
     group(ui, "Show", |ui| {
         column(ui, |ui| {
@@ -1192,11 +1505,11 @@ fn page_number_menu(app: &App, r: &Response, cmds: &mut Vec<Cmd>) {
             for st in pagenum::STYLES {
                 let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 64.0), Sense::click());
                 if resp.hovered() {
-                    ui.painter().rect_filled(rect, 3.0, HOVER);
+                    ui.painter().rect_filled(rect, 3.0, pal().hover);
                 }
                 let tile = Rect::from_min_size(rect.min + vec2(4.0, 4.0), vec2(rect.width() - 8.0, 40.0));
                 paint_page_number_preview(ui, tile, st, place);
-                ui.painter().text(pos2(tile.left(), tile.bottom() + 9.0), Align2::LEFT_CENTER, st.name, theme::ui_font(12.0), TEXT);
+                ui.painter().text(pos2(tile.left(), tile.bottom() + 9.0), Align2::LEFT_CENTER, st.name, theme::ui_font(12.0), pal().text);
                 if resp.clicked() {
                     cmds.push(Cmd::PageNumber(st.id, place));
                     ui.close();
@@ -1204,7 +1517,7 @@ fn page_number_menu(app: &App, r: &Response, cmds: &mut Vec<Cmd>) {
             }
         });
         ui.separator();
-        ui.label(egui::RichText::new("Number format").size(11.5).color(TEXT_DIM));
+        ui.label(egui::RichText::new("Number format").size(11.5).color(pal().text_dim));
         let cur = app.doc.page_number_format();
         ui.horizontal_wrapped(|ui| {
             for (fmt, label) in pagenum::FORMATS {
@@ -1284,7 +1597,7 @@ pub fn status_bar(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
     let full = ui.max_rect();
     let bar = Rect::from_min_max(pos2(full.left(), full.bottom() - STATUS_H), full.right_bottom());
     let p = ui.painter().clone();
-    p.rect_filled(bar, 0.0, BG);
+    p.rect_filled(bar, 0.0, pal().bg);
     let y = bar.center().y;
     let pages = app.layout.as_ref().map(|l| l.pages.len()).unwrap_or(1);
     let cur_page = app.locate(&app.caret).map(|(p, _)| p + 1).unwrap_or(1);
@@ -1294,31 +1607,31 @@ pub fn status_bar(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
         let rect = Rect::from_min_size(pos2(x - 4.0, bar.top() + 2.0), vec2(text_width(ui, t, 12.0) + 8.0, STATUS_H - 4.0));
         let r = ui.interact(rect, Id::NULL.with(("status", i)), Sense::click());
         if r.hovered() {
-            p.rect_filled(rect, 2.0, HOVER);
+            p.rect_filled(rect, 2.0, pal().hover);
         }
         if i == 1 && r.clicked() {
             cmds.push(Cmd::WordCount);
         }
-        p.text(pos2(x, y), Align2::LEFT_CENTER, t, theme::ui_font(12.0), TEXT_DIM);
+        p.text(pos2(x, y), Align2::LEFT_CENTER, t, theme::ui_font(12.0), pal().text_dim);
         x += text_width(ui, t, 12.0) + 24.0;
     }
     // Right side: zoom.
     let mut rx = bar.right() - 12.0;
     let pct = format!("{}%", (app.zoom * 100.0).round() as i32);
-    p.text(pos2(rx, y), Align2::RIGHT_CENTER, &pct, theme::ui_font(12.0), TEXT_DIM);
+    p.text(pos2(rx, y), Align2::RIGHT_CENTER, &pct, theme::ui_font(12.0), pal().text_dim);
     rx -= 50.0;
     let plus = Rect::from_center_size(pos2(rx, y), vec2(16.0, 16.0));
     if ui.interact(plus, Id::NULL.with("zplus"), Sense::click()).clicked() {
         cmds.push(Cmd::Zoom(((app.zoom * 10.0).round() + 1.0) / 10.0));
     }
-    p.text(plus.center(), Align2::CENTER_CENTER, "+", theme::ui_font(15.0), TEXT_DIM);
+    p.text(plus.center(), Align2::CENTER_CENTER, "+", theme::ui_font(15.0), pal().text_dim);
     let slider = Rect::from_min_max(pos2(rx - 120.0, y - 6.0), pos2(rx - 12.0, y + 6.0));
-    p.hline(slider.x_range(), y, Stroke::new(1.0, TEXT_DIM));
-    p.vline(slider.center().x, (y - 4.0)..=(y + 4.0), Stroke::new(1.0, TEXT_DIM));
+    p.hline(slider.x_range(), y, Stroke::new(1.0, pal().text_dim));
+    p.vline(slider.center().x, (y - 4.0)..=(y + 4.0), Stroke::new(1.0, pal().text_dim));
     // Map 10%..100% to the left half and 100%..500% to the right half.
     let t = if app.zoom <= 1.0 { (app.zoom - 0.1) / 0.9 * 0.5 } else { 0.5 + (app.zoom - 1.0) / 4.0 * 0.5 };
     let kx = slider.left() + t.clamp(0.0, 1.0) * slider.width();
-    p.rect_filled(Rect::from_center_size(pos2(kx, y), vec2(4.0, 12.0)), 1.0, TEXT);
+    p.rect_filled(Rect::from_center_size(pos2(kx, y), vec2(4.0, 12.0)), 1.0, pal().text);
     let sr = ui.interact(slider.expand(4.0), Id::NULL.with("zslider"), Sense::click_and_drag());
     if let (true, Some(pos)) = (sr.dragged() || sr.clicked(), sr.interact_pointer_pos()) {
         let t = ((pos.x - slider.left()) / slider.width()).clamp(0.0, 1.0);
@@ -1329,18 +1642,18 @@ pub fn status_bar(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
     if ui.interact(minus, Id::NULL.with("zminus"), Sense::click()).clicked() {
         cmds.push(Cmd::Zoom(((app.zoom * 10.0).round() - 1.0).max(1.0) / 10.0));
     }
-    p.text(minus.center(), Align2::CENTER_CENTER, "–", theme::ui_font(15.0), TEXT_DIM);
+    p.text(minus.center(), Align2::CENTER_CENTER, "–", theme::ui_font(15.0), pal().text_dim);
     rx = minus.left() - 14.0;
     // View buttons.
     for (i, ic) in [Icon::WebLayout, Icon::PrintLayout, Icon::ReadMode].iter().enumerate() {
         let r = Rect::from_center_size(pos2(rx - 14.0, y), vec2(26.0, 20.0));
         if i == 1 {
-            p.rect_filled(r, 2.0, CHECKED);
+            p.rect_filled(r, 2.0, pal().checked);
         }
-        icons::paint(&p, *ic, r.shrink2(vec2(6.0, 3.0)), TEXT_DIM);
+        icons::paint(&p, *ic, r.shrink2(vec2(6.0, 3.0)), pal().text_dim);
         rx -= 30.0;
     }
     let focus = "Focus";
-    p.text(pos2(rx - 8.0, y), Align2::RIGHT_CENTER, focus, theme::ui_font(12.0), TEXT_DIM);
-    icons::paint(&p, Icon::Focus, Rect::from_center_size(pos2(rx - 18.0 - text_width(ui, focus, 12.0), y), vec2(14.0, 14.0)), TEXT_DIM);
+    p.text(pos2(rx - 8.0, y), Align2::RIGHT_CENTER, focus, theme::ui_font(12.0), pal().text_dim);
+    icons::paint(&p, Icon::Focus, Rect::from_center_size(pos2(rx - 18.0 - text_width(ui, focus, 12.0), y), vec2(14.0, 14.0)), pal().text_dim);
 }

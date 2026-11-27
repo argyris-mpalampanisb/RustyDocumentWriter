@@ -1,0 +1,40 @@
+{
+  "$comment": "Zed's built-in UI themes (One, Ayu, Gruvbox) in Zed's theme-family format, transcribed from Zed's bundled theme files (the installed zed-editor binary stores them compressed). Only the UI keys the app uses are kept.",
+  "themes": [
+    { "name": "One Dark", "appearance": "dark", "style": {
+      "border": "#464b57ff", "background": "#3b414dff", "surface.background": "#2f343eff", "elevated_surface.background": "#2f343eff",
+      "element.hover": "#363c46ff", "element.active": "#454a56ff", "element.selected": "#454a56ff", "element.background": "#2e343eff",
+      "text": "#dce0e5ff", "text.muted": "#a9afbcff", "text.disabled": "#878a98ff", "text.accent": "#74ade8ff", "icon": "#dce0e5ff",
+      "title_bar.background": "#3b414dff", "panel.background": "#2f343eff", "editor.background": "#282c33ff" } },
+    { "name": "One Light", "appearance": "light", "style": {
+      "border": "#c9c9caff", "background": "#dcdcddff", "surface.background": "#ebebecff", "elevated_surface.background": "#ebebecff",
+      "element.hover": "#dfdfe0ff", "element.active": "#cacacaff", "element.selected": "#cacacaff", "element.background": "#ebebecff",
+      "text": "#242529ff", "text.muted": "#58585aff", "text.disabled": "#a1a1a3ff", "text.accent": "#5c78e2ff", "icon": "#242529ff",
+      "title_bar.background": "#dcdcddff", "panel.background": "#ebebecff", "editor.background": "#fafafaff" } },
+    { "name": "Ayu Dark", "appearance": "dark", "style": {
+      "border": "#3f4043ff", "background": "#313337ff", "surface.background": "#1f2127ff", "elevated_surface.background": "#1f2127ff",
+      "element.hover": "#2d2f34ff", "element.active": "#3e4043ff", "element.selected": "#3e4043ff", "element.background": "#1f2127ff",
+      "text": "#bfbdb6ff", "text.muted": "#8a8986ff", "text.disabled": "#696a6aff", "text.accent": "#5ac1feff", "icon": "#bfbdb6ff",
+      "title_bar.background": "#313337ff", "panel.background": "#1f2127ff", "editor.background": "#0d1016ff" } },
+    { "name": "Ayu Mirage", "appearance": "dark", "style": {
+      "border": "#53565dff", "background": "#464a52ff", "surface.background": "#353944ff", "elevated_surface.background": "#353944ff",
+      "element.hover": "#3f4350ff", "element.active": "#50545bff", "element.selected": "#50545bff", "element.background": "#353944ff",
+      "text": "#cccac2ff", "text.muted": "#9a9a98ff", "text.disabled": "#7b7d7fff", "text.accent": "#73cffeff", "icon": "#cccac2ff",
+      "title_bar.background": "#464a52ff", "panel.background": "#353944ff", "editor.background": "#242936ff" } },
+    { "name": "Ayu Light", "appearance": "light", "style": {
+      "border": "#cfd1d2ff", "background": "#dcdddeff", "surface.background": "#ececedff", "elevated_surface.background": "#ececedff",
+      "element.hover": "#e2e3e4ff", "element.active": "#cfd1d2ff", "element.selected": "#cfd1d2ff", "element.background": "#ececedff",
+      "text": "#5c6166ff", "text.muted": "#8c8f93ff", "text.disabled": "#a9acaeff", "text.accent": "#3b9ee5ff", "icon": "#5c6166ff",
+      "title_bar.background": "#dcdddeff", "panel.background": "#ececedff", "editor.background": "#fcfcfcff" } },
+    { "name": "Gruvbox Dark", "appearance": "dark", "style": {
+      "border": "#5b534dff", "background": "#3a3735ff", "surface.background": "#2c2a29ff", "elevated_surface.background": "#2c2a29ff",
+      "element.hover": "#3b3735ff", "element.active": "#5b524cff", "element.selected": "#5b524cff", "element.background": "#2c2a29ff",
+      "text": "#fbf1c7ff", "text.muted": "#c5b597ff", "text.disabled": "#998b78ff", "text.accent": "#83a598ff", "icon": "#fbf1c7ff",
+      "title_bar.background": "#3a3735ff", "panel.background": "#2c2a29ff", "editor.background": "#282828ff" } },
+    { "name": "Gruvbox Light", "appearance": "light", "style": {
+      "border": "#c8b899ff", "background": "#d9c8a4ff", "surface.background": "#ecddb4ff", "elevated_surface.background": "#ecddb4ff",
+      "element.hover": "#e0cfa9ff", "element.active": "#c9b99aff", "element.selected": "#c9b99aff", "element.background": "#ecddb4ff",
+      "text": "#282828ff", "text.muted": "#5f5650ff", "text.disabled": "#897b6eff", "text.accent": "#0b6678ff", "icon": "#282828ff",
+      "title_bar.background": "#d9c8a4ff", "panel.background": "#ecddb4ff", "editor.background": "#fbf1c7ff" } }
+  ]
+}

@@ -93,7 +93,7 @@ pub fn paint(p: &Painter, icon: Icon, r: Rect, fg: Color32) {
             p.rect_stroke(b, 2.0, s(fg), StrokeKind::Middle);
             p.rect_filled(Rect::from_center_size(pos2(b.center().x, b.top()), vec2(b.width() * 0.45, h * 0.14)), 1.5, fg);
             let pg = Rect::from_min_max(pos2(c.x - w * 0.02, c.y - h * 0.08), pos2(r.right() - w * 0.04, r.bottom()));
-            p.rect_filled(pg, 0.0, Color32::from_gray(0x2b));
+            p.rect_filled(pg, 0.0, super::theme::pal().ribbon);
             page(p, pg, BLUE);
         }
         Cut => {
@@ -105,7 +105,7 @@ pub fn paint(p: &Painter, icon: Icon, r: Rect, fg: Color32) {
         Copy => {
             page(p, Rect::from_min_size(r.left_top() + vec2(w * 0.1, h * 0.05), vec2(w * 0.55, h * 0.65)), fg);
             let b = Rect::from_min_size(r.left_top() + vec2(w * 0.35, h * 0.3), vec2(w * 0.55, h * 0.65));
-            p.rect_filled(b, 0.0, Color32::from_gray(0x2b));
+            p.rect_filled(b, 0.0, super::theme::pal().ribbon);
             page(p, b, fg);
         }
         FormatPainter => {
@@ -550,7 +550,7 @@ pub fn paint(p: &Painter, icon: Icon, r: Rect, fg: Color32) {
         }
         DarkMode => {
             p.circle_stroke(c, w * 0.35, s(fg));
-            p.circle_filled(c + vec2(w * 0.15, -h * 0.12), w * 0.3, Color32::from_gray(0x2b));
+            p.circle_filled(c + vec2(w * 0.15, -h * 0.12), w * 0.3, super::theme::pal().ribbon);
         }
         Pdf => {
             page(p, Rect::from_center_size(c, vec2(w * 0.6, h * 0.85)), fg);

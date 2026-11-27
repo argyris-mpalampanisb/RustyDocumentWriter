@@ -34,6 +34,8 @@ pub struct DrawingObj {
     pub h: f32,
     pub kind: DrawKind,
     pub anchor: Option<Anchor>,
+    /// Character offset of the drawing in its paragraph, when it comes from editable body text.
+    pub src_off: Option<usize>,
 }
 
 fn emu(e: Option<&str>) -> f32 {
@@ -170,7 +172,7 @@ pub fn parse_drawing(drawing: &Element, ctx: &super::Ctx, story_part: &str) -> O
     } else {
         None
     };
-    Some(DrawingObj { w, h, kind, anchor })
+    Some(DrawingObj { w, h, kind, anchor, src_off: None })
 }
 
 /// mc:AlternateContent → the w:drawing inside the first Choice, if any.
@@ -222,5 +224,5 @@ pub fn parse_vml(pict: &Element, ctx: &super::Ctx, story_part: &str) -> Option<D
     let img = shape.find_local("imagedata")?;
     let rid = img.attr("r:id").or_else(|| img.attr_local("id"))?;
     let (key, data) = ctx.doc.image_for(story_part, rid)?;
-    Some(DrawingObj { w, h, kind: DrawKind::Image { key, data, crop: [0.0; 4] }, anchor: None })
+    Some(DrawingObj { w, h, kind: DrawKind::Image { key, data, crop: [0.0; 4] }, anchor: None, src_off: None })
 }

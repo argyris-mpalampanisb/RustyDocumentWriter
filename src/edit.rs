@@ -98,6 +98,16 @@ pub fn para_mut<'a>(doc: &'a mut Document, story: &Story, path: &[usize]) -> Opt
     para_in_mut(blocks_mut(doc, story)?, path)
 }
 
+/// The `w:drawing` at character offset `off` of the paragraph at `path`, if there is one.
+pub fn drawing_at_mut<'a>(doc: &'a mut Document, story: &Story, path: &[usize], off: usize) -> Option<&'a mut Element> {
+    let p = para_mut(doc, story, path)?;
+    let (run_path, item, _) = p.locate(off, false)?;
+    match p.run_at_path_mut(&run_path)?.items.get_mut(item)? {
+        RunItem::Drawing(d) => Some(d),
+        _ => None,
+    }
+}
+
 /// All paragraph paths in document order.
 pub fn para_paths(blocks: &[Block]) -> Vec<Vec<usize>> {
     let mut out = Vec::new();
@@ -498,6 +508,62 @@ pub fn set_highlight(rpr: &mut Element, name: Option<&str>) {
 
 pub fn set_underline(rpr: &mut Element, on: bool) {
     rpr.set_child(Element::new("w:u").with_attr("w:val", if on { "single" } else { "none" }), RPR_ORDER);
+}
+
+/// Set an underline style (`single`, `double`, `thick`, `dotted`, `dash`, `wave`, `words`...),
+/// keeping any underline colour. `None` writes `w:val="none"` so styles can't bring it back.
+pub fn set_underline_style(rpr: &mut Element, style: Option<&str>) {
+    let color = rpr.child("w:u").and_then(|u| u.attr("w:color")).map(str::to_string);
+    let mut u = Element::new("w:u").with_attr("w:val", style.unwrap_or("none"));
+    if let (Some(c), Some(_)) = (color, style) {
+        u = u.with_attr("w:color", c);
+    }
+    rpr.set_child(u, RPR_ORDER);
+}
+
+/// Set the underline colour (`None` = follow the text colour). Turns a single underline on if there is none.
+pub fn set_underline_color(rpr: &mut Element, hex: Option<&str>) {
+    let style = rpr.child("w:u").and_then(|u| u.attr("w:val")).filter(|v| *v != "none").unwrap_or("single").to_string();
+    let mut u = Element::new("w:u").with_attr("w:val", style);
+    if let Some(h) = hex {
+        u = u.with_attr("w:color", h);
+    }
+    rpr.set_child(u, RPR_ORDER);
+}
+
+/// Character effects that can't be combined: turning one on turns the others in its group off,
+/// matching the reference Font dialog.
+fn effect_conflicts(name: &str) -> &'static [&'static str] {
+    match name {
+        "w:strike" => &["w:dstrike"],
+        "w:dstrike" => &["w:strike"],
+        "w:caps" => &["w:smallCaps"],
+        "w:smallCaps" => &["w:caps"],
+        "w:emboss" => &["w:imprint", "w:outline", "w:shadow"],
+        "w:imprint" => &["w:emboss", "w:outline", "w:shadow"],
+        "w:outline" | "w:shadow" => &["w:emboss", "w:imprint"],
+        _ => &[],
+    }
+}
+
+/// Toggle a character effect (`w:outline`, `w:shadow`, `w:emboss`, `w:imprint`, `w:caps`,
+/// `w:smallCaps`, `w:strike`, `w:dstrike`), clearing the effects it excludes.
+pub fn set_effect(rpr: &mut Element, name: &str, on: bool) {
+    if on {
+        for other in effect_conflicts(name) {
+            if rpr.child(other).is_some() {
+                set_toggle(rpr, other, false);
+            }
+        }
+    }
+    set_toggle(rpr, name, on);
+}
+
+/// Remove the decorative effects (outline, shadow, emboss, engrave) and leave the rest alone.
+pub fn clear_effects(rpr: &mut Element) {
+    for n in ["w:outline", "w:shadow", "w:emboss", "w:imprint"] {
+        rpr.remove_child(n);
+    }
 }
 
 pub fn set_vert_align(rpr: &mut Element, v: Option<&str>) {

@@ -335,10 +335,16 @@ fn handle_keys(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>, page_h_pt: f32) 
                     Key::F12 => cmds.push(Cmd::SaveAs),
                     _ if ctrl => {
                         match key {
+                            Key::A if shift => cmds.push(Cmd::Effect("w:caps")),
                             Key::A => cmds.push(Cmd::SelectAll),
                             Key::B => cmds.push(Cmd::Toggle("w:b")),
                             Key::I => cmds.push(Cmd::Toggle("w:i")),
                             Key::U => cmds.push(Cmd::Underline),
+                            // Reference shortcuts: Ctrl+Shift+D double underline, +W words only,
+                            // +K small caps, +A all caps.
+                            Key::D if shift => cmds.push(Cmd::UnderlineStyle("double")),
+                            Key::W if shift => cmds.push(Cmd::UnderlineStyle("words")),
+                            Key::K if shift => cmds.push(Cmd::Effect("w:smallCaps")),
                             Key::Z => cmds.push(Cmd::Undo),
                             Key::Y => cmds.push(Cmd::Redo),
                             Key::S => cmds.push(if shift { Cmd::SaveAs } else { Cmd::Save }),
@@ -390,8 +396,8 @@ pub fn document_area(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
         let nav = Rect::from_min_max(area.left_top(), pos2(area.left() + 260.0, area.bottom()));
         area.min.x = nav.right();
         let mut nui = ui.new_child(egui::UiBuilder::new().max_rect(nav.shrink(8.0)));
-        nui.painter().rect_filled(nav, 0.0, Color32::from_rgb(0x20, 0x20, 0x20));
-        nui.label(egui::RichText::new("Navigation").size(16.0).color(TEXT));
+        nui.painter().rect_filled(nav, 0.0, pal().ribbon);
+        nui.label(egui::RichText::new("Navigation").size(16.0).color(pal().text));
         nui.add_space(6.0);
         let mut find = app.find_text.clone();
         if nui.add(egui::TextEdit::singleline(&mut find).hint_text("Search document").desired_width(f32::INFINITY)).changed() {
@@ -401,7 +407,7 @@ pub fn document_area(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
         let outline = app.layout.as_ref().map(|l| l.outline.clone()).unwrap_or_default();
         egui::ScrollArea::vertical().id_salt("nav").show(&mut nui, |ui| {
             if outline.is_empty() {
-                ui.label(egui::RichText::new("Create an interactive outline of your document by applying Heading styles.").color(TEXT_DIM).size(12.0));
+                ui.label(egui::RichText::new("Create an interactive outline of your document by applying Heading styles.").color(pal().text_dim).size(12.0));
             }
             for (text, lvl, _page, _y, path) in outline {
                 ui.horizontal(|ui| {
@@ -551,7 +557,7 @@ pub fn document_area(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
                     let y = if is_footer { sr.top() + page.footer_area.0 * kk } else { sr.top() + page.header_area.1 * kk };
                     let mut x = sr.left();
                     while x < sr.right() {
-                        painter.hline(x..=(x + 4.0).min(sr.right()), y, Stroke::new(1.0, ACCENT));
+                        painter.hline(x..=(x + 4.0).min(sr.right()), y, Stroke::new(1.0, pal().accent));
                         x += 8.0;
                     }
                     let label = if is_footer { "Footer" } else { "Header" };
@@ -596,6 +602,20 @@ pub fn document_area(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
                 // In the header/footer zone: start editing it.
                 let pi = rects.iter().position(|r| r.translate(origin.to_vec2()).contains(p));
                 let mut handled = false;
+                // On a WordArt: open its dialog (topmost object first).
+                if let (Some(pi), Some(layout)) = (pi, app.layout.as_ref()) {
+                    let sr = rects[pi].translate(origin.to_vec2());
+                    let (x, y) = ((p.x - sr.left()) / kk, (p.y - sr.top()) / kk);
+                    let hits: Vec<_> = layout.pages[pi].objects.iter().rev().filter(|o| x >= o.x && x <= o.x + o.w && y >= o.y && y <= o.y + o.h).map(|o| (o.path.clone(), o.off)).collect();
+                    for (path, off) in hits {
+                        let is_wordart = edit::drawing_at_mut(&mut app.doc, &Story::Body, &path, off).is_some_and(|d| rusty_document_writer::wordart::read(d).is_some());
+                        if is_wordart {
+                            cmds.push(Cmd::EditWordArt(path, off));
+                            handled = true;
+                            break;
+                        }
+                    }
+                }
                 if let (Some(pi), Some(layout)) = (pi, app.layout.as_ref()) {
                     let page = &layout.pages[pi];
                     let sr = rects[pi].translate(origin.to_vec2());
@@ -666,7 +686,7 @@ pub fn document_area(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
 
 fn draw_ruler(app: &App, ui: &Ui, rr: Rect) {
     let p = ui.painter();
-    p.rect_filled(rr, 0.0, Color32::from_rgb(0x1A, 0x1A, 0x1A));
+    p.rect_filled(rr, 0.0, pal().ribbon);
     let Some(layout) = &app.layout else { return };
     let Some(page) = layout.pages.first() else { return };
     let k = k(app);
@@ -675,8 +695,8 @@ fn draw_ruler(app: &App, ui: &Ui, rr: Rect) {
     let x0 = rr.left() + (content_w - w) / 2.0;
     let (_, mr, _, ml) = page.margins;
     let band = Rect::from_min_max(pos2(x0, rr.top() + 4.0), pos2(x0 + w, rr.bottom() - 4.0));
-    p.rect_filled(band, 0.0, Color32::from_rgb(0x3A, 0x3A, 0x3A));
-    p.rect_filled(Rect::from_min_max(pos2(x0 + ml * k, band.top()), pos2(x0 + w - mr * k, band.bottom())), 0.0, Color32::from_rgb(0x58, 0x58, 0x58));
+    p.rect_filled(band, 0.0, pal().sep);
+    p.rect_filled(Rect::from_min_max(pos2(x0 + ml * k, band.top()), pos2(x0 + w - mr * k, band.bottom())), 0.0, if pal().dark { pal().ribbon.lerp_to_gamma(pal().text, 0.25) } else { Color32::WHITE });
     let mut i = 0;
     while (i as f32) * 9.0 <= page.width {
         let x = x0 + ml * k + (i as f32 * 9.0 - ml.min(page.width)) * k * 0.0 + (i as f32 * 9.0) * k - ml * k;
@@ -684,11 +704,11 @@ fn draw_ruler(app: &App, ui: &Ui, rr: Rect) {
         let half = i % 4 == 0;
         let rel = (i as f32 * 9.0 - ml) / 72.0;
         if inch && rel.abs() > 0.01 {
-            p.text(pos2(x, band.center().y), Align2::CENTER_CENTER, format!("{}", rel.abs().round() as i32), theme::ui_font(9.5), TEXT_DIM);
+            p.text(pos2(x, band.center().y), Align2::CENTER_CENTER, format!("{}", rel.abs().round() as i32), theme::ui_font(9.5), pal().text_dim);
         } else if half {
-            p.vline(x, (band.center().y - 3.0)..=(band.center().y + 3.0), Stroke::new(1.0, TEXT_DIM));
+            p.vline(x, (band.center().y - 3.0)..=(band.center().y + 3.0), Stroke::new(1.0, pal().text_dim));
         } else {
-            p.vline(x, (band.center().y - 1.0)..=(band.center().y + 1.0), Stroke::new(1.0, TEXT_DIM));
+            p.vline(x, (band.center().y - 1.0)..=(band.center().y + 1.0), Stroke::new(1.0, pal().text_dim));
         }
         i += 1;
     }

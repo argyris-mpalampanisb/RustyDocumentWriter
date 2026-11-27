@@ -5,10 +5,47 @@
 //! (the last term is GDI's tmExternalLeading). We reproduce exactly that so
 //! line heights — and therefore page breaks — match the reference.
 
-use ab_glyph::{Font as _, FontArc, FontVec, GlyphId};
+use ab_glyph::{Font as _, FontArc, FontRef, GlyphId};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::hash::{BuildHasherDefault, Hasher};
+use std::sync::{Arc, Mutex, OnceLock};
+
+/// FxHash (as in rustc): the glyph and kerning caches are hit for every
+/// character laid out, and SipHash's DoS resistance is pure overhead for
+/// keys that are chars and glyph ids. It took a fifth of all layout time.
+#[derive(Default)]
+struct FxHasher(u64);
+
+impl Hasher for FxHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.write_u64(b as u64);
+        }
+    }
+    fn write_u8(&mut self, n: u8) {
+        self.write_u64(n as u64);
+    }
+    fn write_u16(&mut self, n: u16) {
+        self.write_u64(n as u64);
+    }
+    fn write_u32(&mut self, n: u32) {
+        self.write_u64(n as u64);
+    }
+    fn write_u64(&mut self, n: u64) {
+        self.0 = (self.0.rotate_left(5) ^ n).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+    fn write_usize(&mut self, n: usize) {
+        self.write_u64(n as u64);
+    }
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+const FAST_GLYPHS: usize = 0x800;
+
+type FxMap<K, V> = HashMap<K, V, BuildHasherDefault<FxHasher>>;
 
 #[derive(Clone, Debug)]
 struct FaceEntry {
@@ -52,18 +89,30 @@ pub struct LoadedFont {
     pub italic: bool,
     /// Symbol-encoded (3,0) cmap, which ab_glyph doesn't consult.
     symbol_map: HashMap<u32, u16>,
-    advance_cache: Mutex<HashMap<char, (GlyphId, f32)>>,
-    data: Arc<Vec<u8>>,
+    /// Glyph and advance for U+0000..U+07FF (Latin, Greek, Cyrillic, Hebrew,
+    /// Arabic) without taking a lock; the rest go through `advance_cache`.
+    fast_glyphs: Box<[OnceLock<(GlyphId, f32)>; FAST_GLYPHS]>,
+    advance_cache: Mutex<FxMap<char, (GlyphId, f32)>>,
+    data: &'static [u8],
     face_index: u32,
-    kern_cache: Mutex<HashMap<(u16, u16), f32>>,
+    kern_cache: Mutex<FxMap<(u16, u16), f32>>,
 }
 
 impl LoadedFont {
     /// Glyph and advance in font units, with symbol-font PUA remapping.
     pub fn glyph(&self, c: char) -> (GlyphId, f32) {
+        if let Some(slot) = self.fast_glyphs.get(c as usize) {
+            return *slot.get_or_init(|| self.lookup_glyph(c));
+        }
         if let Some(v) = self.advance_cache.lock().unwrap().get(&c) {
             return *v;
         }
+        let v = self.lookup_glyph(c);
+        self.advance_cache.lock().unwrap().insert(c, v);
+        v
+    }
+
+    fn lookup_glyph(&self, c: char) -> (GlyphId, f32) {
         let mut g = self.font.glyph_id(c);
         if g.0 == 0 && self.symbol {
             let cp = c as u32;
@@ -72,9 +121,7 @@ impl LoadedFont {
                 g = GlyphId(*id);
             }
         }
-        let adv = self.font.h_advance_unscaled(g);
-        self.advance_cache.lock().unwrap().insert(c, (g, adv));
-        (g, adv)
+        (g, self.font.h_advance_unscaled(g))
     }
 
     /// Pair kerning in font units (OpenType GPOS 'kern' feature, falling back to the legacy 'kern' table).
@@ -89,7 +136,7 @@ impl LoadedFont {
 
     fn gpos_kern(&self, a: GlyphId, b: GlyphId) -> Option<f32> {
         use ttf_parser::gpos::{PairAdjustment, PositioningSubtable};
-        let face = ttf_parser::Face::parse(&self.data, self.face_index).ok()?;
+        let face = ttf_parser::Face::parse(self.data, self.face_index).ok()?;
         let gpos = face.tables().gpos?;
         let (ta, tb) = (ttf_parser::GlyphId(a.0), ttf_parser::GlyphId(b.0));
         let kern_tag = ttf_parser::Tag::from_bytes(b"kern");
@@ -150,7 +197,7 @@ pub struct FontDb {
     by_family: HashMap<String, Vec<usize>>,
     loaded: Mutex<HashMap<usize, Arc<LoadedFont>>>,
     resolve_cache: Mutex<HashMap<(String, bool, bool), FontMatch>>,
-    fallback_cache: Mutex<HashMap<(char, bool, bool), Option<FontMatch>>>,
+    fallback_cache: Mutex<FxMap<(char, bool, bool), Option<FontMatch>>>,
 }
 
 #[derive(Clone)]
@@ -188,6 +235,22 @@ const GLYPH_FALLBACKS: &[&str] = &[
     "Nirmala UI", "Leelawadee UI", "Ebrima", "Gadugi", "Microsoft Himalaya", "Mongolian Baiti", "Microsoft Yi Baiti",
     "Segoe UI Historic", "Noto Sans", "Noto Sans CJK SC", "DejaVu Sans", "Liberation Sans",
 ];
+
+/// The bytes of a font file, read once per process and shared by every face in
+/// it (a .ttc such as Noto Sans CJK holds the Japanese, Chinese and Korean faces
+/// in one 30 MB file). Loaded fonts live as long as the program anyway, so the
+/// buffer is intentionally never freed; that is what lets ab_glyph and
+/// ttf-parser borrow it without copying.
+fn font_file(path: &Path) -> Option<&'static [u8]> {
+    static FILES: OnceLock<Mutex<HashMap<PathBuf, &'static [u8]>>> = OnceLock::new();
+    let files = FILES.get_or_init(Default::default);
+    if let Some(b) = files.lock().unwrap().get(path) {
+        return Some(b);
+    }
+    let bytes: &'static [u8] = Box::leak(std::fs::read(path).ok()?.into_boxed_slice());
+    // Two threads may race to read the same file; keep the first copy.
+    Some(*files.lock().unwrap().entry(path.to_path_buf()).or_insert(bytes))
+}
 
 fn font_dirs() -> Vec<PathBuf> {
     let mut v = Vec::new();
@@ -389,7 +452,7 @@ impl FontDb {
             by_family,
             loaded: Mutex::new(HashMap::new()),
             resolve_cache: Mutex::new(HashMap::new()),
-            fallback_cache: Mutex::new(HashMap::new()),
+            fallback_cache: Mutex::new(FxMap::default()),
         }
     }
 
@@ -433,11 +496,11 @@ impl FontDb {
         }
         let e = self.entries.get(idx)?;
         let data = match e.embedded {
-            Some(b) => b.to_vec(),
-            None => std::fs::read(&e.path).ok()?,
+            Some(b) => b,
+            None => font_file(&e.path)?,
         };
         let (upm, wa, wd, el, ul, st, symbol, symbol_map) = {
-            let face = ttf_parser::Face::parse(&data, e.index).ok()?;
+            let face = ttf_parser::Face::parse(data, e.index).ok()?;
             let upm = face.units_per_em() as f32;
             let hhea = &face.tables().hhea;
             let (mut wa, mut wd) = match face.tables().os2 {
@@ -467,8 +530,7 @@ impl FontDb {
             let symbol = !symbol_map.is_empty();
             (upm, wa, wd, ext, ul, st, symbol, symbol_map)
         };
-        let shared = Arc::new(data.clone());
-        let fv = FontVec::try_from_vec_and_index(data, e.index).ok()?;
+        let fv = FontRef::try_from_slice_and_index(data, e.index).ok()?;
         let lf = Arc::new(LoadedFont {
             id: idx,
             family: e.families.first().cloned().unwrap_or_default(),
@@ -485,10 +547,11 @@ impl FontDb {
             bold: e.bold,
             italic: e.italic,
             symbol_map,
-            data: shared,
+            data,
             face_index: e.index,
-            kern_cache: Mutex::new(HashMap::new()),
-            advance_cache: Mutex::new(HashMap::new()),
+            kern_cache: Mutex::new(FxMap::default()),
+            fast_glyphs: Box::new(std::array::from_fn(|_| OnceLock::new())),
+            advance_cache: Mutex::new(FxMap::default()),
         });
         self.loaded.lock().unwrap().insert(idx, lf.clone());
         Some(lf)

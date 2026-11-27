@@ -39,7 +39,7 @@ jobs:
         run: |
           $name = "rusty-document-writer-windows-${{ matrix.arch }}"
           New-Item -ItemType Directory -Force "dist/$name" | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/rusty-document-writer.exe", "target/${{ matrix.target }}/release/rusty-document-writer-render.exe" "dist/$name/"
+          Copy-Item "target/${{ matrix.target }}/release/rusty-document-writer.exe", "target/${{ matrix.target }}/release/rusty-document-writer-render.exe", "target/${{ matrix.target }}/release/rusty-document-writer-convert.exe" "dist/$name/"
           Copy-Item README.md, LICENSE, THIRD-PARTY-LICENSES.html, assets/fonts/LICENSE-LiberationFonts-OFL.txt "dist/$name/"
           Compress-Archive -Path "dist/$name/*" -DestinationPath "dist/$name.zip" -Force
       - uses: actions/upload-artifact@v4
@@ -72,6 +72,7 @@ jobs:
             sed "s/VERSION/$VERSION/g" packaging/macos/Info.plist > "$app/Contents/Info.plist"
             lipo -create $(for t in "$@"; do echo target/$t/release/rusty-document-writer; done) -output "$app/Contents/MacOS/rusty-document-writer"
             lipo -create $(for t in "$@"; do echo target/$t/release/rusty-document-writer-render; done) -output "dist/rusty-document-writer-macos-$label/rusty-document-writer-render"
+            lipo -create $(for t in "$@"; do echo target/$t/release/rusty-document-writer-convert; done) -output "dist/rusty-document-writer-macos-$label/rusty-document-writer-convert"
             # Ad-hoc signature so Apple Silicon will launch it (not notarized).
             codesign --force --deep -s - "$app"
             cp README.md LICENSE THIRD-PARTY-LICENSES.html assets/fonts/LICENSE-LiberationFonts-OFL.txt "dist/rusty-document-writer-macos-$label/"
@@ -111,7 +112,7 @@ jobs:
         run: |
           name=rusty-document-writer-linux-${{ matrix.arch }}
           mkdir -p dist/$name
-          cp target/${{ matrix.target }}/release/rusty-document-writer target/${{ matrix.target }}/release/rusty-document-writer-render dist/$name/
+          cp target/${{ matrix.target }}/release/rusty-document-writer target/${{ matrix.target }}/release/rusty-document-writer-render target/${{ matrix.target }}/release/rusty-document-writer-convert dist/$name/
           cp README.md LICENSE THIRD-PARTY-LICENSES.html assets/fonts/LICENSE-LiberationFonts-OFL.txt packaging/linux/rusty-document-writer.desktop dist/$name/
           tar -C dist -czf dist/$name.tar.gz $name
       - uses: actions/upload-artifact@v4

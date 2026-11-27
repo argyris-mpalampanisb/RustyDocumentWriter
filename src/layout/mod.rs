@@ -31,6 +31,27 @@ pub enum Story {
     Footnote(String),
 }
 
+/// Character effects drawn by the rasterizer around each glyph run:
+/// `w:outline` (hollow), `w:shadow`, `w:emboss` and `w:imprint` (engrave).
+/// They never change advance widths, so line breaks are unaffected.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TextFx {
+    pub outline: bool,
+    pub shadow: bool,
+    pub emboss: bool,
+    pub imprint: bool,
+    /// Word 2010+ effects (WordArt): when present they replace the legacy ones above.
+    pub rich: Option<Arc<crate::props::RichFx>>,
+}
+
+impl TextFx {
+    pub fn of(rp: &crate::props::RunProps) -> TextFx {
+        // Emboss and engrave replace outline/shadow, as in the reference.
+        let relief = rp.emboss || rp.imprint;
+        TextFx { outline: rp.outline && !relief, shadow: rp.shadow && !relief, emboss: rp.emboss, imprint: rp.imprint && !rp.emboss, rich: rp.fx14.clone() }
+    }
+}
+
 #[derive(Clone)]
 pub enum Item {
     Glyphs {
@@ -42,6 +63,7 @@ pub enum Item {
         synth_bold: bool,
         synth_italic: bool,
         scale_x: f32,
+        fx: TextFx,
     },
     Rect { x: f32, y: f32, w: f32, h: f32, color: Color },
     Image { key: String, data: Arc<Vec<u8>>, x: f32, y: f32, w: f32, h: f32, crop: [f32; 4] },
@@ -137,6 +159,20 @@ pub struct Page {
     pub margins: (f32, f32, f32, f32), // top, right, bottom, left
     pub header_area: (f32, f32),
     pub footer_area: (f32, f32),
+    /// Floating objects anchored in body paragraphs, in drawing order, for hit-testing.
+    pub objects: Vec<PageObject>,
+}
+
+/// A floating object on a page (page coordinates, points) and where its drawing lives:
+/// the body paragraph `path` and the drawing's character offset `off` in it.
+#[derive(Clone, Debug)]
+pub struct PageObject {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub path: Vec<usize>,
+    pub off: usize,
 }
 
 #[derive(Clone, Default)]
@@ -228,7 +264,12 @@ pub struct Ctx<'a> {
     pub res: Resolver<'a>,
     pub fonts: &'a FontDb,
     pub opts: &'a LayoutOptions,
+    /// Run styles keyed by the rPr element's address (see `para::rstyle`).
     style_cache: RefCell<HashMap<(String, usize, String, bool), Rc<RStyle>>>,
+    /// Drawings parsed during this pass, kept alive so the rPr addresses inside text boxes
+    /// stay unique: a freed text box's address could otherwise be reused by the next one
+    /// and hit a stale `style_cache` entry.
+    pub(crate) keep_alive: RefCell<Vec<Rc<DrawingObj>>>,
     pub footnotes: HashMap<String, Vec<Block>>,
     pub footnote_numbers: RefCell<HashMap<String, usize>>,
     pub current_footnote: RefCell<Option<String>>,
@@ -257,6 +298,7 @@ impl<'a> Ctx<'a> {
             fonts,
             opts,
             style_cache: RefCell::new(HashMap::new()),
+            keep_alive: RefCell::new(Vec::new()),
             footnotes,
             footnote_numbers: RefCell::new(HashMap::new()),
             current_footnote: RefCell::new(None),
@@ -410,6 +452,7 @@ impl<'c, 'a> Flow<'c, 'a> {
             margins: (s.margin_top, s.margin_right, s.margin_bottom, s.margin_left),
             header_area: (s.margin_header, body_top),
             footer_area: (body_bottom, s.page_h - s.margin_footer),
+            objects: Vec::new(),
         });
         self.body_top = body_top;
         self.body_bottom = body_bottom;

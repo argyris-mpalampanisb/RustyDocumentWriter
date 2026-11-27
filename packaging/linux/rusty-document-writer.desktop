@@ -5,4 +5,4 @@ Comment=Word processor with faithful DOCX layout
 Exec=rusty-document-writer %f
 Terminal=false
 Categories=Office;WordProcessor;
-MimeType=application/vnd.openxmlformats-officedocument.wordprocessingml.document;
+MimeType=application/vnd.openxmlformats-officedocument.wordprocessingml.document;application/vnd.openxmlformats-officedocument.wordprocessingml.template;application/vnd.ms-word.document.macroEnabled.12;application/vnd.ms-word.template.macroEnabled.12;application/msword;application/vnd.oasis.opendocument.text;application/rtf;text/rtf;

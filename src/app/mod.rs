@@ -4,7 +4,9 @@ mod backstage;
 mod canvas;
 mod icons;
 mod ribbon;
+mod wordart_ui;
 pub mod theme;
+mod files;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -55,6 +57,7 @@ pub enum Cmd {
     New,
     Open,
     OpenPath(PathBuf),
+    Export,
     RemoveRecent(PathBuf),
     ClearRecent,
     Save,
@@ -67,6 +70,13 @@ pub enum Cmd {
     Paste,
     Toggle(&'static str),
     Underline,
+    UnderlineStyle(&'static str),
+    UnderlineColor(Option<String>),
+    /// Toggle a character effect (`w:outline`, `w:shadow`, `w:emboss`, `w:imprint`,
+    /// `w:caps`, `w:smallCaps`, `w:dstrike`), clearing the ones it excludes.
+    Effect(&'static str),
+    ClearEffects,
+    TextTheme(usize),
     VertAlign(&'static str),
     GrowFont,
     ShrinkFont,
@@ -92,6 +102,16 @@ pub enum Cmd {
     BlankPage,
     InsertTable(usize, usize),
     InsertPicture,
+    /// Insert shape `i` of the built-in 3D shape library, in the current shape colour.
+    InsertShape(usize),
+    /// Set the colour new shapes are inserted in (`None` = neutral silver).
+    ShapeColor(Option<String>),
+    /// Open the WordArt dialog for a new WordArt in style `i`.
+    NewWordArt(usize),
+    /// Open the WordArt dialog for the drawing at (body paragraph path, offset).
+    EditWordArt(Vec<usize>, usize),
+    /// Insert or update the WordArt from the open dialog.
+    ApplyWordArt,
     InsertSymbol(char),
     InsertDateTime,
     PageNumber(&'static str, rusty_document_writer::pagenum::Place),
@@ -137,7 +157,16 @@ pub struct Toolbar {
     pub bold: bool,
     pub italic: bool,
     pub underline: bool,
+    /// The underline style at the caret (`single`, `double`, `wave`...), if any.
+    pub underline_style: Option<String>,
     pub strike: bool,
+    pub dstrike: bool,
+    pub caps: bool,
+    pub small_caps: bool,
+    pub outline: bool,
+    pub shadow: bool,
+    pub emboss: bool,
+    pub imprint: bool,
     pub sub: bool,
     pub sup: bool,
     pub align: Option<Align>,
@@ -178,6 +207,14 @@ pub struct App {
     pub show_ruler: bool,
     pub show_nav: bool,
     pub dark_page: bool,
+    /// Colour for inserted library shapes (hex), `None` for the neutral render.
+    pub shape_color: Option<String>,
+    /// Gallery thumbnails of the shape library, tinted for the given colour.
+    pub shape_thumbs: Option<(Option<String>, Vec<egui::TextureHandle>)>,
+    /// WordArt gallery tiles, rendered on first use.
+    pub wordart_tiles: Option<Vec<egui::TextureHandle>>,
+    /// The open WordArt dialog, if any.
+    pub wordart_edit: Option<wordart_ui::WordArtEdit>,
     pub backstage: bool,
     pub modified: bool,
     pub desired_x: Option<f32>,
@@ -199,6 +236,8 @@ pub struct App {
     pub frame_count: u64,
     pub last_zoom: f32,
     pub zoom_changed: Instant,
+    /// A conversion running in the background (see `files`).
+    pub job: Option<files::Job>,
 }
 
 fn recent_path() -> Option<PathBuf> {
@@ -243,6 +282,10 @@ impl App {
             show_ruler: false,
             show_nav: false,
             dark_page: false,
+            shape_color: Some("156082".into()),
+            shape_thumbs: None,
+            wordart_tiles: None,
+            wordart_edit: None,
             backstage: false,
             modified: false,
             desired_x: None,
@@ -263,6 +306,7 @@ impl App {
             frame_count: 0,
             last_zoom: 1.2,
             zoom_changed: Instant::now(),
+            job: None,
         };
         if let Some(p) = open {
             app.open_path(&p);
@@ -514,6 +558,26 @@ impl App {
 
     // ----------------------------------------------------------------- formatting helpers
 
+    /// Insert a picture at the caret, `w_pt` x `h_pt`, shrunk to fit the text column.
+    fn insert_picture(&mut self, bytes: Vec<u8>, ext: &str, name: &str, mut w_pt: f32, mut h_pt: f32) {
+        self.checkpoint("picture");
+        let sect = self.doc.sections();
+        let s = &sect.last().unwrap().1;
+        let max_w = s.page_w - s.margin_left - s.margin_right;
+        if w_pt > max_w {
+            h_pt *= max_w / w_pt;
+            w_pt = max_w;
+        }
+        let rid = self.doc.add_image(bytes, ext);
+        let id = (self.doc.images.len() + 100) as u32;
+        let d = edit::image_drawing(&rid, w_pt, h_pt, id, name);
+        self.delete_selection();
+        let p = edit::insert_item(&mut self.doc, &self.caret.clone(), RunItem::Drawing(d), None);
+        self.caret = p.clone();
+        self.anchor = p;
+        self.invalidate();
+    }
+
     fn format_run(&mut self, f: &dyn Fn(&mut Element)) {
         if self.has_sel() {
             self.checkpoint("format");
@@ -575,7 +639,15 @@ impl App {
         self.tb.bold = rp.bold;
         self.tb.italic = rp.italic;
         self.tb.underline = rp.underline.is_some();
+        self.tb.underline_style = rp.underline.clone();
         self.tb.strike = rp.strike;
+        self.tb.dstrike = rp.dstrike;
+        self.tb.caps = rp.caps;
+        self.tb.small_caps = rp.small_caps;
+        self.tb.outline = rp.outline;
+        self.tb.shadow = rp.shadow;
+        self.tb.emboss = rp.emboss;
+        self.tb.imprint = rp.imprint;
         self.tb.sub = rp.vert_align == rusty_document_writer::props::VertAlign::Sub;
         self.tb.sup = rp.vert_align == rusty_document_writer::props::VertAlign::Super;
         self.tb.align = Some(pp.align);
@@ -592,24 +664,6 @@ impl App {
     }
 
     // ----------------------------------------------------------------- files
-
-    pub fn open_path(&mut self, p: &Path) {
-        match Document::open(p) {
-            Ok(d) => {
-                self.doc = d;
-                self.after_load();
-                self.push_recent(p);
-            }
-            Err(e) => {
-                // A recent entry whose file has gone away is just noise: drop it.
-                if !p.exists() && self.recent.iter().any(|x| x == p) {
-                    self.recent.retain(|x| x != p);
-                    self.save_recent();
-                }
-                self.dialog = Dialog::Message("Couldn't open the document".into(), e)
-            }
-        }
-    }
 
     fn after_load(&mut self) {
         self.doc.ensure_nonempty();
@@ -647,23 +701,18 @@ impl App {
     }
 
     fn save(&mut self, force_dialog: bool) -> bool {
-        let path = if force_dialog || self.doc.path.is_none() {
-            let mut d = rfd::FileDialog::new().add_filter("DOCX Document", &["docx"]).set_file_name(format!("{}.docx", self.doc.title()));
-            if let Some(dir) = self.doc.path.as_ref().and_then(|p| p.parent()) {
-                d = d.set_directory(dir);
-            }
-            match d.save_file() {
-                Some(p) => p,
-                None => return false,
-            }
-        } else {
-            self.doc.path.clone().unwrap()
-        };
-        let path = if path.extension().is_none() { path.with_extension("docx") } else { path };
+        let Some(path) = self.save_target(force_dialog) else { return false };
+        let dropped_macros = files::drops_macros(&self.doc, &path);
         match self.doc.save_as(&path) {
             Ok(()) => {
                 self.modified = false;
                 self.push_recent(&path);
+                if dropped_macros {
+                    self.dialog = Dialog::Message(
+                        "Macros were removed".into(),
+                        "This type of file can't contain macros, so they were left out. To keep them, save as a Word Macro-Enabled Document (.docm).".into(),
+                    );
+                }
                 true
             }
             Err(e) => {
@@ -690,7 +739,13 @@ impl App {
                     self.dialog = Dialog::ConfirmClose { then: Box::new(Cmd::Open) };
                     return;
                 }
-                if let Some(p) = rfd::FileDialog::new().add_filter("DOCX Documents", &["docx", "docm", "dotx"]).pick_file() {
+                let all: Vec<&str> = files::WORD_EXTS.iter().chain(files::IMPORT_EXTS).copied().collect();
+                let picked = rfd::FileDialog::new()
+                    .add_filter("All Documents", &all)
+                    .add_filter("Word Documents", files::WORD_EXTS)
+                    .add_filter("Other Documents (converted with LibreOffice)", files::IMPORT_EXTS)
+                    .pick_file();
+                if let Some(p) = picked {
                     self.open_path(&p);
                 }
             }
@@ -712,6 +767,7 @@ impl App {
             Cmd::SaveAs => {
                 self.save(true);
             }
+            Cmd::Export => self.export(),
             Cmd::CloseDoc => {
                 if self.modified {
                     self.dialog = Dialog::ConfirmClose { then: Box::new(Cmd::CloseDoc) };
@@ -746,8 +802,37 @@ impl App {
                     "w:strike" => !self.tb.strike,
                     _ => true,
                 };
-                self.format_run(&move |r| edit::set_toggle(r, name, on));
+                if name == "w:strike" {
+                    self.format_run(&move |r| edit::set_effect(r, name, on));
+                } else {
+                    self.format_run(&move |r| edit::set_toggle(r, name, on));
+                }
             }
+            Cmd::Effect(name) => {
+                let on = !match name {
+                    "w:dstrike" => self.tb.dstrike,
+                    "w:caps" => self.tb.caps,
+                    "w:smallCaps" => self.tb.small_caps,
+                    "w:outline" => self.tb.outline,
+                    "w:shadow" => self.tb.shadow,
+                    "w:emboss" => self.tb.emboss,
+                    "w:imprint" => self.tb.imprint,
+                    _ => false,
+                };
+                self.format_run(&move |r| edit::set_effect(r, name, on));
+            }
+            Cmd::ClearEffects => self.format_run(&edit::clear_effects),
+            Cmd::TextTheme(i) => {
+                if let Some(t) = rusty_document_writer::texttheme::THEMES.get(i).copied() {
+                    self.format_run(&move |r| t.apply(r));
+                }
+            }
+            Cmd::UnderlineStyle(style) => {
+                // Picking the style already applied turns the underline off, like the toolbar toggle.
+                let off = style == "none" || self.tb.underline_style.as_deref() == Some(style);
+                self.format_run(&move |r| edit::set_underline_style(r, if off { None } else { Some(style) }));
+            }
+            Cmd::UnderlineColor(c) => self.format_run(&move |r| edit::set_underline_color(r, c.as_deref())),
             Cmd::Underline => {
                 let on = !self.tb.underline;
                 self.format_run(&move |r| edit::set_underline(r, on));
@@ -917,36 +1002,76 @@ impl App {
             Cmd::InsertPicture => {
                 if let Some(path) = rfd::FileDialog::new().add_filter("Pictures", &["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff"]).pick_file() {
                     match std::fs::read(&path) {
-                        Ok(bytes) => {
-                            let dims = image::load_from_memory(&bytes).map(|i| (i.width(), i.height()));
-                            match dims {
-                                Ok((w, h)) => {
-                                    self.checkpoint("picture");
-                                    let sect = self.doc.sections();
-                                    let s = &sect.last().unwrap().1;
-                                    let max_w = s.page_w - s.margin_left - s.margin_right;
-                                    let mut wpt = w as f32 * 0.75;
-                                    let mut hpt = h as f32 * 0.75;
-                                    if wpt > max_w {
-                                        hpt *= max_w / wpt;
-                                        wpt = max_w;
-                                    }
-                                    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("png").to_string();
-                                    let rid = self.doc.add_image(bytes, &ext);
-                                    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                                    let id = (self.doc.images.len() + 100) as u32;
-                                    let d = edit::image_drawing(&rid, wpt, hpt, id, &name);
-                                    self.delete_selection();
-                                    let p = edit::insert_item(&mut self.doc, &self.caret.clone(), RunItem::Drawing(d), None);
-                                    self.caret = p.clone();
-                                    self.anchor = p;
-                                    self.invalidate();
-                                }
-                                Err(e) => self.dialog = Dialog::Message("Unsupported picture".into(), e.to_string()),
+                        Ok(bytes) => match image::load_from_memory(&bytes).map(|i| (i.width(), i.height())) {
+                            Ok((w, h)) => {
+                                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("png").to_string();
+                                let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                                self.insert_picture(bytes, &ext, &name, w as f32 * 0.75, h as f32 * 0.75);
                             }
-                        }
+                            Err(e) => self.dialog = Dialog::Message("Unsupported picture".into(), e.to_string()),
+                        },
                         Err(e) => self.dialog = Dialog::Message("Couldn't read the picture".into(), e.to_string()),
                     }
+                }
+            }
+            Cmd::InsertShape(i) => {
+                use rusty_document_writer::shapes;
+                if let Some(shape) = shapes::SHAPES.get(i) {
+                    let color = self.shape_color.as_deref().and_then(rusty_document_writer::props::Color::from_hex);
+                    let png = shapes::tinted_png(shape, color);
+                    if let Ok(img) = image::load_from_memory(&png) {
+                        // 1.5 inches on the longer side.
+                        let k = 108.0 / img.width().max(img.height()) as f32;
+                        let (w, h) = (img.width() as f32 * k, img.height() as f32 * k);
+                        self.insert_picture(png, "png", shape.name, w, h);
+                    }
+                }
+            }
+            Cmd::ShapeColor(c) => self.shape_color = c,
+            Cmd::NewWordArt(style) => {
+                let theme_font = self.doc.theme.major_latin.clone();
+                let font = if theme_font.is_empty() { "Arial".to_string() } else { theme_font };
+                let art = rusty_document_writer::wordart::WordArt { style, text: "Your text here".into(), font, size: 40.0 };
+                self.wordart_edit = Some(wordart_ui::WordArtEdit::new(None, art));
+            }
+            Cmd::EditWordArt(path, off) => {
+                let art = edit::drawing_at_mut(&mut self.doc, &Story::Body, &path, off).and_then(|d| rusty_document_writer::wordart::read(d));
+                if let Some(art) = art {
+                    self.wordart_edit = Some(wordart_ui::WordArtEdit::new(Some((path, off)), art));
+                }
+            }
+            Cmd::ApplyWordArt => {
+                use rusty_document_writer::wordart;
+                if let Some(ed) = self.wordart_edit.take() {
+                    self.checkpoint("wordart");
+                    let fonts = self.fonts.clone();
+                    match ed.target {
+                        Some((path, off)) => {
+                            if let Some(d) = edit::drawing_at_mut(&mut self.doc, &Story::Body, &path, off) {
+                                let id = d.find_local("docPr").and_then(|e| e.attr("id")).and_then(|v| v.parse().ok()).unwrap_or(1);
+                                let old = d.clone();
+                                *d = wordart::drawing(&ed.art, &fonts, id, Some(&old));
+                            }
+                        }
+                        None => {
+                            // docPr ids must be unique; pictures number theirs from images.len() + 100.
+                            let id = (wordart::max_docpr_id(&self.doc.body) + 1).max(self.doc.images.len() as u32 + 101);
+                            let d = wordart::drawing(&ed.art, &fonts, id, None);
+                            self.delete_selection();
+                            // Anchor it in its own paragraph after the caret's, so it never lands on top of
+                            // another float anchored in the same paragraph (they would share a position).
+                            let mut at = self.caret.clone();
+                            let len = edit::para(&self.doc, &at).map(|p| p.char_len()).unwrap_or(0);
+                            if len > 0 {
+                                at.off = len;
+                                at = edit::split_paragraph(&mut self.doc, &at);
+                            }
+                            let p = edit::insert_item(&mut self.doc, &at, RunItem::Drawing(d), None);
+                            self.caret = p.clone();
+                            self.anchor = p;
+                        }
+                    }
+                    self.invalidate();
                 }
             }
             Cmd::InsertSymbol(c) => self.type_text(&c.to_string()),
@@ -1064,7 +1189,7 @@ impl eframe::App for App {
         }
         // Dropped files.
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect());
-        if let Some(p) = dropped.into_iter().find(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("docx"))) {
+        if let Some(p) = dropped.into_iter().find(|p| files::is_openable(p)) {
             self.run(Cmd::OpenPath(p), &ctx);
         }
         let title = format!("{}{} - RustyDocumentWriter", self.doc.title(), if self.modified { "*" } else { "" });
@@ -1075,7 +1200,7 @@ impl eframe::App for App {
         self.ensure_layout();
         let mut cmds: Vec<Cmd> = Vec::new();
 
-        egui::Frame::new().fill(theme::BG).show(ui, |ui| {
+        egui::Frame::new().fill(theme::pal().canvas).show(ui, |ui| {
             ui.set_min_size(ui.available_size());
             ribbon::window_chrome(self, ui, &title, &mut cmds);
             if self.backstage {
@@ -1088,7 +1213,9 @@ impl eframe::App for App {
             }
         });
         ribbon::resize_edges(&ctx);
+        self.poll_job(&ctx);
         self.dialogs(&ctx, &mut cmds);
+        wordart_ui::dialog(self, &ctx, &mut cmds);
 
         for c in cmds {
             self.run(c, &ctx);

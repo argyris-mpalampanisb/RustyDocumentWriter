@@ -115,5 +115,5 @@ pub fn blank_package() -> Package {
         ("docProps/core.xml", CORE.to_string()),
         ("docProps/app.xml", APP.to_string()),
     ];
-    Package { parts: parts.into_iter().map(|(n, d)| Part { name: n.to_string(), data: d.into_bytes() }).collect() }
+    Package { parts: parts.into_iter().map(|(n, d)| Part::new(n, d.into_bytes())).collect(), source: None }
 }

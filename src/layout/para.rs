@@ -1,7 +1,7 @@
 //! Paragraph layout: atoms → lines → positioned items.
 
 use super::drawing::{self, DrawKind, DrawingObj};
-use super::{Ctx, Exclusion, Flow, Frag, Item, LineInfo, Story};
+use super::{Ctx, Exclusion, Flow, Frag, Item, LineInfo, Story, TextFx};
 use crate::fonts::FontMatch;
 use crate::model::{item_len, Block, Inline, Paragraph, RunItem};
 use crate::props::{Align, Border, Color, LineRule, ListCounters, ParaProps, RunProps, TableCtx, VertAlign};
@@ -159,12 +159,15 @@ fn make_char_atom(ctx: &Ctx, c: char, st: &Rc<RStyle>, off: Option<usize>) -> At
         ch = up;
     }
     let mut fm = st.fm[s].clone();
-    if !fm.font.has_glyph(ch) && !matches!(ch, ' ' | '\u{00A0}' | '\u{200B}') {
+    // One cache lookup gives both "is it in this font" and the advance.
+    let mut glyph = fm.font.glyph(ch);
+    if glyph.0.0 == 0 && !matches!(ch, ' ' | '\u{00A0}' | '\u{200B}') {
         if let Some(f) = ctx.fonts.fallback_for(ch, rp.bold, rp.italic) {
             fm = f;
+            glyph = fm.font.glyph(ch);
         }
     }
-    let base = fm.font.advance(ch, size);
+    let base = glyph.1 * size / fm.font.upm;
     let w = base * rp.scale / 100.0 + rp.spacing + if fm.synth_bold { size * 0.02 } else { 0.0 };
     let f = &fm.font;
     let asc = f.ascent(size) + f.leading(size) + st.raise.max(0.0);
@@ -340,12 +343,12 @@ pub fn build_atoms(
                                         push_drawing(ctx, d, &st, Some(o), part, atoms, floats);
                                     } else if let Some(pict) = e.find_local("pict") {
                                         if let Some(obj) = drawing::parse_vml(pict, ctx, part) {
-                                            push_obj(obj, &st, if len > 0 { Some(o) } else { None }, atoms, floats);
+                                            push_obj(ctx, obj, &st, if len > 0 { Some(o) } else { None }, atoms, floats);
                                         }
                                     }
                                 } else if e.name == "w:pict" || e.name == "w:object" {
                                     if let Some(obj) = drawing::parse_vml(e, ctx, part) {
-                                        push_obj(obj, &st, None, atoms, floats);
+                                        push_obj(ctx, obj, &st, None, atoms, floats);
                                     }
                                 } else if e.name == "w:footnoteReference" || e.name == "w:endnoteReference" {
                                     let id = e.attr("w:id").unwrap_or("").to_string();
@@ -449,18 +452,22 @@ fn apply_kerning(atoms: &mut [Atom]) {
 
 fn push_drawing(ctx: &Ctx, d: &Element, st: &Rc<RStyle>, off: Option<usize>, part: &str, atoms: &mut Vec<Atom>, floats: &mut Vec<Rc<DrawingObj>>) {
     match drawing::parse_drawing(d, ctx, part) {
-        Some(obj) => push_obj(obj, st, off, atoms, floats),
+        Some(obj) => push_obj(ctx, obj, st, off, atoms, floats),
         None => {
             // Keep the offset slot so the caret model stays consistent.
             if off.is_some() {
-                atoms.push(simple_atom(AK::Float(Rc::new(DrawingObj { w: 0.0, h: 0.0, kind: DrawKind::Placeholder(String::new()), anchor: None })), st, off));
+                atoms.push(simple_atom(AK::Float(Rc::new(DrawingObj { w: 0.0, h: 0.0, kind: DrawKind::Placeholder(String::new()), anchor: None, src_off: None })), st, off));
             }
         }
     }
 }
 
-fn push_obj(obj: DrawingObj, st: &Rc<RStyle>, off: Option<usize>, atoms: &mut Vec<Atom>, floats: &mut Vec<Rc<DrawingObj>>) {
+fn push_obj(ctx: &Ctx, mut obj: DrawingObj, st: &Rc<RStyle>, off: Option<usize>, atoms: &mut Vec<Atom>, floats: &mut Vec<Rc<DrawingObj>>) {
+    obj.src_off = off;
     let obj = Rc::new(obj);
+    if matches!(obj.kind, DrawKind::Shape { .. }) {
+        ctx.keep_alive.borrow_mut().push(obj.clone());
+    }
     if obj.anchor.is_some() {
         floats.push(obj.clone());
         let mut a = simple_atom(AK::Float(obj), st, off);
@@ -1071,6 +1078,7 @@ pub fn emit_line(
                 synth_bold: f.synth_bold,
                 synth_italic: f.synth_italic,
                 scale_x: 1.0,
+                fx: TextFx::of(&st.rp),
             });
         }
     }
@@ -1088,6 +1096,7 @@ pub fn emit_line(
                 synth_bold: f.synth_bold,
                 synth_italic: f.synth_italic,
                 scale_x: a.st.rp.scale / 100.0,
+                fx: TextFx::of(&a.st.rp),
             });
         }
     }
@@ -1128,6 +1137,7 @@ pub fn emit_line(
                         synth_bold: f.synth_bold,
                         synth_italic: f.synth_italic,
                         scale_x: a.st.rp.scale / 100.0,
+                        fx: TextFx::of(&a.st.rp),
                     });
                 }
                 k = kk;
@@ -1197,15 +1207,46 @@ pub fn emit_line(
                         items.push(Item::Rect { x: sx, y: uy, w: ex - sx, h: th, color: uc });
                         items.push(Item::Rect { x: sx, y: uy + th * 2.0, w: ex - sx, h: th, color: uc });
                     }
-                    "thick" | "dottedHeavy" | "dashedHeavy" | "wavyHeavy" => {
+                    "wave" | "wavyHeavy" | "wavyDouble" => {
+                        let lw = if u == "wavyHeavy" { th * 1.8 } else { th };
+                        let amp = (th * 1.1).max(0.6);
+                        let period = (th * 7.0).max(3.0);
+                        let step = (period / 16.0).max(0.2);
+                        let rows: &[f32] = if u == "wavyDouble" { &[0.0, 1.0] } else { &[0.0] };
+                        for row in rows {
+                            let y0 = uy + row * (amp * 2.0 + lw * 1.5);
+                            let mut x = sx;
+                            while x < ex {
+                                let ph = (x - sx) / period * std::f32::consts::TAU;
+                                let y = y0 + amp * ph.sin();
+                                items.push(Item::Rect { x, y: y - lw / 2.0 + th / 2.0, w: step.min(ex - x) + 0.05, h: lw, color: uc });
+                                x += step;
+                            }
+                        }
+                    }
+                    "thick" => {
                         items.push(Item::Rect { x: sx, y: uy, w: ex - sx, h: th * 2.0, color: uc });
                     }
-                    "dotted" | "dash" | "dashLong" | "dotDash" | "dotDotDash" => {
-                        let step = if u == "dotted" { th * 2.0 } else { th * 6.0 };
-                        let mut x = sx;
+                    "dotted" | "dash" | "dashLong" | "dotDash" | "dotDotDash" | "dottedHeavy" | "dashedHeavy" | "dashLongHeavy" | "dashDotHeavy" | "dashDotDotHeavy" => {
+                        // On/off lengths in units of the line thickness.
+                        let pattern: &[f32] = match u.as_str() {
+                            "dotted" | "dottedHeavy" => &[1.0, 1.0],
+                            "dash" | "dashedHeavy" => &[4.0, 2.5],
+                            "dashLong" | "dashLongHeavy" => &[8.0, 3.0],
+                            "dotDash" | "dashDotHeavy" => &[4.0, 2.0, 1.0, 2.0],
+                            _ => &[4.0, 2.0, 1.0, 2.0, 1.0, 2.0],
+                        };
+                        let heavy = u.ends_with("Heavy");
+                        let h = if heavy { th * 2.0 } else { th };
+                        let unit = h.max(0.5);
+                        let (mut x, mut i) = (sx, 0);
                         while x < ex {
-                            items.push(Item::Rect { x, y: uy, w: (step / 2.0).min(ex - x), h: th, color: uc });
-                            x += step;
+                            let len = pattern[i % pattern.len()] * unit;
+                            if i % 2 == 0 {
+                                items.push(Item::Rect { x, y: uy, w: len.min(ex - x), h, color: uc });
+                            }
+                            x += len;
+                            i += 1;
                         }
                     }
                     _ => items.push(Item::Rect { x: sx, y: uy, w: ex - sx, h: th, color: uc }),
@@ -1231,7 +1272,7 @@ pub fn emit_line(
         let mf = &m.mark.fm[0];
         let push_mark = |ch: char, x: f32, size: f32, items: &mut Vec<Item>| {
             let fm = if mf.font.has_glyph(ch) { mf.clone() } else { ctx.fonts.fallback_for(ch, false, false).unwrap_or(mf.clone()) };
-            items.push(Item::Glyphs { font: fm.font.clone(), size, color: mark_color, y: base, glyphs: vec![(fm.font.glyph(ch).0, x)], synth_bold: false, synth_italic: false, scale_x: 1.0 });
+            items.push(Item::Glyphs { font: fm.font.clone(), size, color: mark_color, y: base, glyphs: vec![(fm.font.glyph(ch).0, x)], synth_bold: false, synth_italic: false, scale_x: 1.0, fx: TextFx::default() });
         };
         for (k, a) in atoms.iter().enumerate() {
             match a.kind {
@@ -1259,16 +1300,21 @@ pub fn emit_line(
     let mut carets: Vec<(usize, f32)> = Vec::new();
     let mut start = usize::MAX;
     let mut end = 0usize;
+    // Largest offset in `carets`: in left-to-right text offsets only grow, so the
+    // duplicate check below is O(1) instead of a scan (which made this O(n²) per line).
+    let mut max_caret = 0usize;
     for (k, a) in atoms.iter().enumerate() {
         if let Some(o) = a.off {
             carets.push((o, ox + line.xs[k]));
+            max_caret = max_caret.max(o);
             start = start.min(o);
             let next_x = ox + line.xs[k] + a.w;
             end = end.max(o + 1);
             if !matches!(a.kind, AK::LineBreak | AK::PageBreak | AK::ColumnBreak) {
                 // Provisional caret after this atom (replaced if another atom follows).
-                if carets.iter().all(|(oo, _)| *oo != o + 1) {
+                if o + 1 > max_caret || carets.iter().all(|(oo, _)| *oo != o + 1) {
                     carets.push((o + 1, next_x));
+                    max_caret = max_caret.max(o + 1);
                 }
             }
         }
@@ -1637,7 +1683,7 @@ pub fn place_paragraph(flow: &mut Flow, p: &Paragraph, path: Vec<usize>, sibling
         let mut added = false;
         let floats = m.floats.clone();
         for f in &floats {
-            if place_float(flow, f, para_top, m.pp.ind_left) {
+            if place_float(flow, f, para_top, m.pp.ind_left, &path) {
                 added = true;
             }
         }
@@ -1837,7 +1883,7 @@ fn limits_for(excl: &[Exclusion], col_x: f32, col_w: f32, y: f32, h: f32) -> Lin
 }
 
 /// Position an anchored object on the current page. Returns true if it adds a text exclusion.
-fn place_float(flow: &mut Flow, f: &Rc<DrawingObj>, para_top: f32, ind_left: f32) -> bool {
+fn place_float(flow: &mut Flow, f: &Rc<DrawingObj>, para_top: f32, ind_left: f32, path: &[usize]) -> bool {
     let Some(a) = &f.anchor else { return false };
     let s = &flow.sect;
     let col_x = flow.col_x();
@@ -1872,6 +1918,9 @@ fn place_float(flow: &mut Flow, f: &Rc<DrawingObj>, para_top: f32, ind_left: f32
     let mut v = Vec::new();
     emit_obj(flow.ctx, f, x, y, &mut v);
     let page = flow.page();
+    if let Some(off) = f.src_off {
+        page.objects.push(super::PageObject { x, y, w: f.w, h: f.h, path: path.to_vec(), off });
+    }
     if a.behind {
         page.items.splice(0..0, v);
     } else {
