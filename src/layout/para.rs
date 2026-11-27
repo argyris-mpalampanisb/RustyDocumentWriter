@@ -1497,6 +1497,23 @@ pub fn layout_blocks(
                 let (bt, bb) = border_extra(&m.pp);
                 y += bt;
                 let y_start = y;
+                // Floats anchored here, positioned within this region (cell, header, text box).
+                let placed: Vec<(&Rc<DrawingObj>, f32, f32, bool)> =
+                    m.floats.iter().filter_map(|f| f.anchor.as_ref().map(|a| (f, a))).map(|(f, a)| {
+                        let page_rel = matches!(a.v_rel.as_str(), "page" | "margin" | "topMargin" | "bottomMargin");
+                        let (x, fy) = if page_rel { float_page_pos(ctx, f) } else { region_float_pos(f, width, y_start) };
+                        (f, x, fy, page_rel)
+                    }).collect();
+                // In a table cell, "top and bottom" wrapping moves the paragraph's text
+                // below the object. (Header/footer floats never move text or grow the
+                // header, so this only applies in cells.)
+                let in_cell = tctx.is_some();
+                for (f, _, fy, page_rel) in &placed {
+                    let a = f.anchor.as_ref().unwrap();
+                    if in_cell && !page_rel && a.wrap == "wrapTopAndBottom" && *fy <= y + 0.5 {
+                        y = y.max(fy + f.h + a.dist[1]);
+                    }
+                }
                 let insert_at = fr.items.len();
                 for li in 0..m.lines.len() {
                     let cbg = *ctx.cell_bg.borrow();
@@ -1506,18 +1523,17 @@ pub fn layout_blocks(
                 }
                 decorate(&m.pp, 0.0, width, y_start, y, true, true, &mut fr.items, insert_at);
                 y += bb;
-                // Floating objects anchored in this paragraph (relative to paragraph).
-                for f in &m.floats {
-                    if let Some(a) = &f.anchor {
-                        let x = a.h_off;
-                        let fy = if matches!(a.v_rel.as_str(), "paragraph" | "line") { y_start + a.v_off } else { a.v_off };
-                        let page_rel = matches!(a.v_rel.as_str(), "page" | "margin" | "topMargin" | "bottomMargin");
-                        let mut v = Vec::new();
-                        let (hx, vy) = if page_rel { float_page_pos(ctx, f) } else { (x, fy) };
-                        emit_obj(ctx, f, hx, vy, &mut v);
-                        for it in v {
-                            fr.floats.push((it, page_rel));
-                        }
+                for (f, x, fy, page_rel) in placed {
+                    let a = f.anchor.as_ref().unwrap();
+                    let mut v = Vec::new();
+                    emit_obj(ctx, f, x, fy, &mut v);
+                    for it in v {
+                        fr.floats.push((it, page_rel));
+                    }
+                    // A cell grows to hold objects that text wraps around; ones in
+                    // front of or behind the text don't take up room.
+                    if in_cell && !page_rel && a.wrap != "wrapNone" {
+                        y = y.max(fy + f.h + a.dist[1]);
                     }
                 }
                 pending_after = m.pp.space_after;
@@ -1540,6 +1556,24 @@ pub fn layout_blocks(
     }
     fr.height = y + pending_after;
     fr
+}
+
+/// Position of a float inside a non-paginated region `width` wide whose anchor
+/// paragraph starts at `para_top` (alignment is relative to the region, which is
+/// what Word does for objects laid out in a table cell).
+fn region_float_pos(f: &DrawingObj, width: f32, para_top: f32) -> (f32, f32) {
+    let a = f.anchor.as_ref().unwrap();
+    let x = match a.h_align.as_deref() {
+        Some("center") => (width - f.w) / 2.0,
+        Some("right") | Some("outside") => width - f.w,
+        Some(_) => 0.0,
+        None => a.h_off,
+    };
+    let y = match a.v_rel.as_str() {
+        "paragraph" | "line" => para_top + a.v_off,
+        _ => a.v_off,
+    };
+    (x, y)
 }
 
 /// Page-relative position for floats inside headers/footers.

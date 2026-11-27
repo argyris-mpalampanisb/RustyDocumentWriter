@@ -178,6 +178,14 @@ Render pages to PNG without a window, which is handy for comparing against a ref
 cargo run --release --bin rusty-document-writer-render -- my-file.docx out_dir --dpi 110
 ```
 
+Check files against the Office schemas with Microsoft's Open XML SDK validator (needs the .NET SDK), and build a document that exercises every editing path for checking in Word, LibreOffice and OpenOffice:
+
+```bash
+cargo run --release --example make_compat -- compat.docx
+dotnet run -c Release --project tools/validate -- compat.docx                     # current Word
+dotnet run -c Release --project tools/validate -- --format Office2007 compat.docx # Word 2007
+```
+
 Check that documents survive a save unchanged, and time each stage:
 
 ```bash

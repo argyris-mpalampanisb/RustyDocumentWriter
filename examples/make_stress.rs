@@ -34,10 +34,10 @@ fn main() {
         (r#"<w:spacing w:line="360" w:lineRule="auto"/><w:jc w:val="both"/>"#, "1.5 lines justified"),
         (r#"<w:spacing w:line="300" w:lineRule="exact"/>"#, "exactly 15pt"),
         (r#"<w:spacing w:line="400" w:lineRule="atLeast"/>"#, "at least 20pt"),
-        (r#"<w:ind w:firstLine="720"/><w:spacing w:before="240" w:after="240"/>"#, "first line indent, 12pt before/after"),
-        (r#"<w:ind w:left="720" w:hanging="720"/><w:spacing w:after="0"/>"#, "hanging indent, no space after"),
+        (r#"<w:spacing w:before="240" w:after="240"/><w:ind w:firstLine="720"/>"#, "first line indent, 12pt before/after"),
+        (r#"<w:spacing w:after="0"/><w:ind w:left="720" w:hanging="720"/>"#, "hanging indent, no space after"),
         (r#"<w:pBdr><w:top w:val="single" w:sz="8" w:space="4" w:color="auto"/><w:bottom w:val="single" w:sz="8" w:space="4" w:color="auto"/></w:pBdr><w:shd w:val="clear" w:color="auto" w:fill="DDEEFF"/>"#, "bordered and shaded"),
-        (r#"<w:jc w:val="center"/><w:spacing w:line="480" w:lineRule="auto"/>"#, "double spaced centered"),
+        (r#"<w:spacing w:line="480" w:lineRule="auto"/><w:jc w:val="center"/>"#, "double spaced centered"),
         (r#"<w:ind w:left="1440" w:right="1440"/>"#, "indented both sides"),
     ]
     .iter()

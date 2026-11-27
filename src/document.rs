@@ -396,6 +396,31 @@ impl Document {
         }
     }
 
+    /// A `wp:docPr` id for a new drawing. Ids must be unique across the whole
+    /// document (Word reports "unreadable content" otherwise), so this looks at the
+    /// body, headers and footers being edited and at every part as last loaded or
+    /// saved (which covers drawings we don't model, e.g. inside mc:AlternateContent).
+    pub fn next_drawing_id(&self) -> u32 {
+        let mut max = crate::wordart::max_docpr_id(&self.body);
+        for hf in self.header_footers.values() {
+            max = max.max(crate::wordart::max_docpr_id(&hf.blocks));
+        }
+        let needle = b"docPr id=\"";
+        for part in self.package.parts.iter().filter(|p| p.name.starts_with("word/") && p.name.ends_with(".xml")) {
+            let d = &part.data;
+            let mut i = 0;
+            while let Some(k) = d[i..].windows(needle.len()).position(|w| w == needle) {
+                let start = i + k + needle.len();
+                let digits: String = d[start..].iter().take_while(|b| b.is_ascii_digit()).map(|&b| b as char).collect();
+                if let Ok(v) = digits.parse::<u32>() {
+                    max = max.max(v);
+                }
+                i = start;
+            }
+        }
+        max.saturating_add(1)
+    }
+
     /// Does the package carry a VBA project?
     pub fn has_macros(&self) -> bool {
         self.package.rels(&self.main_part).iter().any(|r| r.rel_type.ends_with("/vbaProject"))
@@ -416,7 +441,9 @@ impl Document {
             for b in blocks {
                 match b {
                     Block::Paragraph(p) => {
-                        s.push_str(&p.plain_text());
+                        // Pictures and shapes are U+FFFC placeholders in the editing
+                        // text (they take up a caret position); plain text leaves them out.
+                        s.extend(p.plain_text().chars().filter(|c| *c != '\u{FFFC}'));
                         s.push('\n');
                     }
                     Block::Table(t) => {

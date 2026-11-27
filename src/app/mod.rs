@@ -578,7 +578,7 @@ impl App {
             w_pt = max_w;
         }
         let rid = self.doc.add_image(bytes, ext);
-        let id = (self.doc.images.len() + 100) as u32;
+        let id = self.doc.next_drawing_id();
         let d = edit::image_drawing(&rid, w_pt, h_pt, id, name);
         self.delete_selection();
         let p = edit::insert_item(&mut self.doc, &self.caret.clone(), RunItem::Drawing(d), None);
@@ -1056,16 +1056,19 @@ impl App {
                     let fonts = self.fonts.clone();
                     match ed.target {
                         Some((path, off)) => {
-                            if let Some(d) = edit::drawing_at_mut(&mut self.doc, &Story::Body, &path, off) {
-                                let id = d.find_local("docPr").and_then(|e| e.attr("id")).and_then(|v| v.parse().ok()).unwrap_or(1);
-                                let old = d.clone();
-                                *d = wordart::drawing(&ed.art, &fonts, id, Some(&old));
+                            if let Some(item) = edit::drawing_item_mut(&mut self.doc, &Story::Body, &path, off) {
+                                let old = match item {
+                                    RunItem::Drawing(d) | RunItem::Other(d) => d.clone(),
+                                    _ => unreachable!(),
+                                };
+                                let id = old.find_local("docPr").and_then(|e| e.attr("id")).and_then(|v| v.parse().ok()).unwrap_or(1);
+                                // Replace the whole item so the fallback copy never goes stale.
+                                *item = wordart::run_item(&ed.art, &fonts, id, Some(&old));
                             }
                         }
                         None => {
-                            // docPr ids must be unique; pictures number theirs from images.len() + 100.
-                            let id = (wordart::max_docpr_id(&self.doc.body) + 1).max(self.doc.images.len() as u32 + 101);
-                            let d = wordart::drawing(&ed.art, &fonts, id, None);
+                            let id = self.doc.next_drawing_id();
+                            let item = wordart::run_item(&ed.art, &fonts, id, None);
                             self.delete_selection();
                             // Anchor it in its own paragraph after the caret's, so it never lands on top of
                             // another float anchored in the same paragraph (they would share a position).
@@ -1075,7 +1078,7 @@ impl App {
                                 at.off = len;
                                 at = edit::split_paragraph(&mut self.doc, &at);
                             }
-                            let p = edit::insert_item(&mut self.doc, &at, RunItem::Drawing(d), None);
+                            let p = edit::insert_item(&mut self.doc, &at, item, None);
                             self.caret = p.clone();
                             self.anchor = p;
                         }

@@ -100,10 +100,21 @@ pub fn para_mut<'a>(doc: &'a mut Document, story: &Story, path: &[usize]) -> Opt
 
 /// The `w:drawing` at character offset `off` of the paragraph at `path`, if there is one.
 pub fn drawing_at_mut<'a>(doc: &'a mut Document, story: &Story, path: &[usize], off: usize) -> Option<&'a mut Element> {
+    match drawing_item_mut(doc, story, path, off)? {
+        RunItem::Drawing(d) | RunItem::Other(d) => Some(d),
+        _ => None,
+    }
+}
+
+/// The run item holding the drawing at `off`: a bare w:drawing, or an
+/// `mc:AlternateContent` with a drawing inside (how Word stores shapes and WordArt).
+pub fn drawing_item_mut<'a>(doc: &'a mut Document, story: &Story, path: &[usize], off: usize) -> Option<&'a mut RunItem> {
     let p = para_mut(doc, story, path)?;
     let (run_path, item, _) = p.locate(off, false)?;
-    match p.run_at_path_mut(&run_path)?.items.get_mut(item)? {
-        RunItem::Drawing(d) => Some(d),
+    let it = p.run_at_path_mut(&run_path)?.items.get_mut(item)?;
+    match it {
+        RunItem::Drawing(_) => Some(it),
+        RunItem::Other(e) if e.name == "mc:AlternateContent" && e.find_local("drawing").is_some() => Some(it),
         _ => None,
     }
 }
@@ -385,7 +396,8 @@ pub fn selected_text(doc: &Document, a: &Pos, b: &Pos) -> String {
                 out.push('\n');
             }
         }
-        out.extend(text[s..e.max(s)].iter().map(|c| if *c == '\u{0b}' { '\n' } else { *c }));
+        // Line breaks become newlines; picture/shape placeholders are left out.
+        out.extend(text[s..e.max(s)].iter().filter(|c| **c != '\u{FFFC}').map(|c| if *c == '\u{0b}' { '\n' } else { *c }));
     }
     out
 }

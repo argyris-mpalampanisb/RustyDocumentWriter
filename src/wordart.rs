@@ -268,6 +268,82 @@ pub fn drawing(art: &WordArt, fonts: &FontDb, id: u32, keep: Option<&Element>) -
     xml::parse_str(&x).expect("WordArt XML").root
 }
 
+/// WordArt the way Word 2010+ stores it: `mc:AlternateContent` holding the
+/// DrawingML text box, plus a VML text box with the same text, size, position
+/// and wrapping for readers that predate DrawingML shapes (Word 2007, Apache
+/// OpenOffice 4). `keep` is the existing item (or drawing) being replaced.
+pub fn run_item(art: &WordArt, fonts: &FontDb, id: u32, keep: Option<&Element>) -> crate::model::RunItem {
+    let d = drawing(art, fonts, id, keep.map(inner_drawing));
+    crate::model::RunItem::Other(with_fallback(&d, id))
+}
+
+/// The w:drawing inside an `mc:AlternateContent` (or `e` itself).
+pub fn inner_drawing(e: &Element) -> &Element {
+    if e.local() == "AlternateContent" {
+        for c in e.elements().filter(|c| c.local() == "Choice") {
+            if let Some(d) = c.elements().find(|d| d.name == "w:drawing") {
+                return d;
+            }
+        }
+    }
+    e
+}
+
+/// Wrap an anchored DrawingML text box in `mc:AlternateContent` with a VML fallback.
+pub fn with_fallback(d: &Element, id: u32) -> Element {
+    let pt = |emu: Option<&str>| emu.and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0) / 12700.0;
+    let anchor = d.child_local("anchor");
+    let ext = anchor.and_then(|a| a.child_local("extent"));
+    let (w, h) = (pt(ext.and_then(|e| e.attr("cx"))), pt(ext.and_then(|e| e.attr("cy"))));
+    let dist = |k: &str| pt(anchor.and_then(|a| a.attr(k)));
+    // DrawingML position → VML style (offset, alignment, what it is relative to).
+    let position = |axis: &str, map: &[(&str, &str)]| -> (f64, String, String) {
+        let p = anchor.and_then(|a| a.child_local(axis));
+        let rel = p.and_then(|p| p.attr("relativeFrom")).unwrap_or("");
+        let rel = map.iter().find(|(k, _)| *k == rel).map(|(_, v)| *v).unwrap_or("text").to_string();
+        let align = p.and_then(|p| p.child_local("align")).map(|a| a.text());
+        let off = pt(p.and_then(|p| p.child_local("posOffset")).map(|o| o.text()).as_deref());
+        (off, align.unwrap_or_else(|| "absolute".into()), rel)
+    };
+    let (x, h_align, h_rel) = position(
+        "positionH",
+        &[("column", "text"), ("margin", "margin"), ("page", "page"), ("character", "char"), ("leftMargin", "left-margin-area"), ("rightMargin", "right-margin-area"), ("insideMargin", "inner-margin-area"), ("outsideMargin", "outer-margin-area")],
+    );
+    let (y, v_align, v_rel) = position(
+        "positionV",
+        &[("paragraph", "text"), ("margin", "margin"), ("page", "page"), ("line", "line"), ("topMargin", "top-margin-area"), ("bottomMargin", "bottom-margin-area")],
+    );
+    let wrap = match anchor.and_then(|a| a.elements().find(|e| e.local().starts_with("wrap"))).map(|e| e.local().to_string()).as_deref() {
+        Some("wrapTopAndBottom") => r#"<w10:wrap type="topAndBottom"/>"#,
+        Some("wrapSquare") => r#"<w10:wrap type="square"/>"#,
+        Some("wrapTight") => r#"<w10:wrap type="tight"/>"#,
+        Some("wrapThrough") => r#"<w10:wrap type="through"/>"#,
+        _ => "",
+    };
+    let body = d.find_local("bodyPr");
+    let ins = |k: &str| pt(body.and_then(|b| b.attr(k)));
+    let content = d.find_local("txbxContent").map(|c| c.to_xml()).unwrap_or_default();
+    let style = format!(
+        "position:absolute;margin-left:{x:.2}pt;margin-top:{y:.2}pt;width:{w:.2}pt;height:{h:.2}pt;z-index:251659264;visibility:visible;mso-wrap-style:none;\
+         mso-wrap-distance-left:{:.2}pt;mso-wrap-distance-top:{:.2}pt;mso-wrap-distance-right:{:.2}pt;mso-wrap-distance-bottom:{:.2}pt;\
+         mso-position-horizontal:{h_align};mso-position-horizontal-relative:{h_rel};mso-position-vertical:{v_align};mso-position-vertical-relative:{v_rel}",
+        dist("distL"),
+        dist("distT"),
+        dist("distR"),
+        dist("distB"),
+    );
+    let x = format!(
+        r#"<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w10="urn:schemas-microsoft-com:office:word" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"><mc:Choice Requires="wps">{drawing}</mc:Choice><mc:Fallback><w:pict><v:shape id="WordArt{id}" o:spid="_x0000_s{spid}" coordsize="21600,21600" o:spt="202" path="m,l,21600r21600,l21600,xe" style="{style}" filled="f" stroked="f"><v:textbox inset="{l:.2}pt,{t:.2}pt,{r:.2}pt,{b:.2}pt">{content}</v:textbox>{wrap}</v:shape></w:pict></mc:Fallback></mc:AlternateContent>"#,
+        drawing = d.to_xml(),
+        spid = 1024u64 + id as u64,
+        l = ins("lIns"),
+        t = ins("tIns"),
+        r = ins("rIns"),
+        b = ins("bIns"),
+    );
+    xml::parse_str(&x).expect("WordArt fallback XML").root
+}
+
 /// Read back a WordArt drawing written by [`drawing`] (identified by its `WordArt: <style>` name).
 pub fn read(drawing: &Element) -> Option<WordArt> {
     let name = drawing.find_local("docPr")?.attr("name")?;
@@ -298,9 +374,12 @@ pub fn max_docpr_id(blocks: &[crate::model::Block]) -> u32 {
         match b {
             Block::Paragraph(p) => p.visit_runs(&mut |_, r, _| {
                 for it in &r.items {
-                    if let RunItem::Drawing(d) = it
-                        && let Some(id) = d.find_local("docPr").and_then(|e| e.attr("id")).and_then(|v| v.parse::<u32>().ok())
-                    {
+                    let d = match it {
+                        RunItem::Drawing(d) => d,
+                        RunItem::Other(e) if e.name == "mc:AlternateContent" => e,
+                        _ => continue,
+                    };
+                    if let Some(id) = d.find_local("docPr").and_then(|e| e.attr("id")).and_then(|v| v.parse::<u32>().ok()) {
                         max = max.max(id);
                     }
                 }
