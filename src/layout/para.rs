@@ -31,7 +31,8 @@ pub enum AK {
     PageBreak,
     ColumnBreak,
     Obj(Rc<DrawingObj>),
-    Float(Rc<DrawingObj>),
+    /// Marks where a floating object is anchored; the objects themselves are in `Measured::floats`.
+    Float,
     FootnoteRef(String),
 }
 
@@ -456,7 +457,7 @@ fn push_drawing(ctx: &Ctx, d: &Element, st: &Rc<RStyle>, off: Option<usize>, par
         None => {
             // Keep the offset slot so the caret model stays consistent.
             if off.is_some() {
-                atoms.push(simple_atom(AK::Float(Rc::new(DrawingObj { w: 0.0, h: 0.0, kind: DrawKind::Placeholder(String::new()), anchor: None, src_off: None })), st, off));
+                atoms.push(simple_atom(AK::Float, st, off));
             }
         }
     }
@@ -470,7 +471,7 @@ fn push_obj(ctx: &Ctx, mut obj: DrawingObj, st: &Rc<RStyle>, off: Option<usize>,
     }
     if obj.anchor.is_some() {
         floats.push(obj.clone());
-        let mut a = simple_atom(AK::Float(obj), st, off);
+        let mut a = simple_atom(AK::Float, st, off);
         a.w = 0.0;
         a.asc = 0.0;
         a.desc = 0.0;
@@ -705,7 +706,7 @@ pub fn break_lines(
         let mut desc: f32 = 0.0;
         let mut asc_o: f32 = 0.0;
         for a in &atoms[i..end] {
-            if matches!(a.kind, AK::Float(_)) {
+            if matches!(a.kind, AK::Float) {
                 continue;
             }
             if a.is_obj {
@@ -749,7 +750,7 @@ pub fn break_lines(
         let mut content_end = start_x_base + left_extra;
         let mut last_nonspace = None;
         for (k, a) in atoms[i..end].iter().enumerate() {
-            if !matches!(a.kind, AK::Space(_) | AK::LineBreak | AK::PageBreak | AK::ColumnBreak | AK::Float(_)) {
+            if !matches!(a.kind, AK::Space(_) | AK::LineBreak | AK::PageBreak | AK::ColumnBreak | AK::Float) {
                 content_end = xs[k] + widths[i + k];
                 last_nonspace = Some(k);
             }
@@ -1041,7 +1042,7 @@ pub fn emit_line(
     for (k, a) in atoms.iter().enumerate() {
         let col = a.st.rp.highlight.or(a.st.rp.shading);
         if let Some(c) = col {
-            if matches!(a.kind, AK::LineBreak | AK::PageBreak | AK::ColumnBreak | AK::Float(_)) {
+            if matches!(a.kind, AK::LineBreak | AK::PageBreak | AK::ColumnBreak | AK::Float) {
                 continue;
             }
             let f = a.font.as_ref().map(|f| f.font.clone()).unwrap_or_else(|| a.st.fm[0].font.clone());
@@ -1154,14 +1155,14 @@ pub fn emit_line(
     }
 
     // Decorations: underline & strike, grouped by style.
-    let last_visible = atoms.iter().rposition(|a| !matches!(a.kind, AK::Space(_) | AK::LineBreak | AK::PageBreak | AK::ColumnBreak | AK::Float(_)));
+    let last_visible = atoms.iter().rposition(|a| !matches!(a.kind, AK::Space(_) | AK::LineBreak | AK::PageBreak | AK::ColumnBreak | AK::Float));
     let mut k = 0;
     while k < atoms.len() {
         let a = &atoms[k];
         let rp = &a.st.rp;
         let has_u = rp.underline.is_some();
         let has_s = rp.strike || rp.dstrike;
-        if !(has_u || has_s) || matches!(a.kind, AK::Float(_) | AK::LineBreak | AK::PageBreak | AK::ColumnBreak) || last_visible.is_none_or(|lv| k > lv) {
+        if !(has_u || has_s) || matches!(a.kind, AK::Float | AK::LineBreak | AK::PageBreak | AK::ColumnBreak) || last_visible.is_none_or(|lv| k > lv) {
             k += 1;
             continue;
         }
@@ -1289,7 +1290,7 @@ pub fn emit_line(
             let x = atoms
                 .iter()
                 .enumerate()
-                .filter(|(_, a)| !matches!(a.kind, AK::Float(_)))
+                .filter(|(_, a)| !matches!(a.kind, AK::Float))
                 .map(|(k, a)| line.xs[k] + a.w)
                 .fold(line.left, f32::max);
             push_mark('¶', ox + x, m.mark.size, items);

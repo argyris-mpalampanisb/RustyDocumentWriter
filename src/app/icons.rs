@@ -9,6 +9,9 @@ pub const YELLOW: Color32 = Color32::from_rgb(0xF5, 0xD3, 0x2E);
 pub const ORANGE: Color32 = Color32::from_rgb(0xF0, 0x9A, 0x37);
 pub const PURPLE: Color32 = Color32::from_rgb(0xA8, 0x7B, 0xE0);
 
+/// The full ribbon icon set. Some are drawn but not placed on a ribbon yet
+/// (Video, Immersive, Ruler…); they stay so new buttons can use them.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Icon {
     Paste, Cut, Copy, FormatPainter,

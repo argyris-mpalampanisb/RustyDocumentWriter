@@ -27,7 +27,7 @@ pub fn show(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
     let mut page: Page = ui.data(|d| d.get_temp(id)).unwrap_or(Page::Home);
 
     let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(side.shrink2(vec2(0.0, 10.0))));
-    let mut item = |ui: &mut Ui, label: &str, icon: Option<Icon>, selected: bool| -> bool {
+    let item = |ui: &mut Ui, label: &str, icon: Option<Icon>, selected: bool| -> bool {
         let (rect, r) = ui.allocate_exact_size(vec2(side.width(), 40.0), Sense::click());
         if selected {
             ui.painter().rect_filled(rect, 0.0, pal().checked);
