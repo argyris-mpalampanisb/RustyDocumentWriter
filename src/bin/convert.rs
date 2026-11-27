@@ -1,7 +1,7 @@
 //! File converter built on the editor's own import, layout and export:
 //!
 //! ```text
-//! rusty-document-writer-convert <input> <output> [--dpi N]
+//! rusty-document-writer-convert <input> <output> [--dpi N] [--raster]
 //! rusty-document-writer-convert --to <ext> [--dpi N] <input>...   (writes next to each input)
 //! ```
 //!
@@ -16,16 +16,17 @@ use rusty_document_writer::layout::{layout_document, LayoutOptions};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-const USAGE: &str = "usage: rusty-document-writer-convert <input> <output> [--dpi N]
-       rusty-document-writer-convert --to <ext> [--dpi N] <input>...
-outputs: docx dotx docm dotm pdf txt png (built in); odt doc rtf html (LibreOffice)";
+const USAGE: &str = "usage: rusty-document-writer-convert <input> <output> [--dpi N] [--raster]
+       rusty-document-writer-convert --to <ext> [--dpi N] [--raster] <input>...
+outputs: docx dotx docm dotm pdf txt png (built in); odt doc rtf html (LibreOffice)
+--raster: PDF pages as pictures instead of real text; --dpi: resolution of pictures";
 
 fn fonts() -> &'static FontDb {
     static FONTS: OnceLock<FontDb> = OnceLock::new();
     FONTS.get_or_init(FontDb::load_system)
 }
 
-fn convert_one(input: &Path, output: &Path, dpi: f32) -> Result<(), String> {
+fn convert_one(input: &Path, output: &Path, dpi: f32, raster: bool) -> Result<(), String> {
     let ext = output.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).unwrap_or_default();
     let (mut doc, from) = Document::import(input)?;
     if from != convert::Format::Docx {
@@ -35,7 +36,11 @@ fn convert_one(input: &Path, output: &Path, dpi: f32) -> Result<(), String> {
         "docx" | "dotx" | "docm" | "dotm" => doc.save_as(output),
         "pdf" => {
             let layout = layout_document(&doc, fonts(), &LayoutOptions::default());
-            rusty_document_writer::pdf::export(&layout, &doc.title(), dpi, output)
+            if raster {
+                rusty_document_writer::pdf::export_raster(&layout, &doc.title(), dpi, output)
+            } else {
+                rusty_document_writer::pdf::export(&layout, &doc.title(), dpi, output)
+            }
         }
         "txt" => std::fs::write(output, doc.plain_text()).map_err(|e| e.to_string()),
         "png" => {
@@ -65,6 +70,7 @@ fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let mut dpi = 150.0f32;
     let mut to: Option<String> = None;
+    let mut raster = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -75,6 +81,10 @@ fn main() {
             "--to" if i + 1 < args.len() => {
                 to = Some(args[i + 1].trim_start_matches('.').to_ascii_lowercase());
                 args.drain(i..i + 2);
+            }
+            "--raster" => {
+                raster = true;
+                args.remove(i);
             }
             "-h" | "--help" => {
                 println!("{USAGE}");
@@ -99,7 +109,7 @@ fn main() {
             continue;
         }
         let t = std::time::Instant::now();
-        match convert_one(input, output, dpi) {
+        match convert_one(input, output, dpi, raster) {
             Ok(()) => eprintln!("{} -> {} ({:.0} ms)", input.display(), output.display(), t.elapsed().as_secs_f64() * 1000.0),
             Err(e) => {
                 eprintln!("{}: {e}", input.display());

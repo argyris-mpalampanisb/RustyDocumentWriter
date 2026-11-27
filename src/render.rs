@@ -385,9 +385,23 @@ impl Raster {
         let i = ((y as u32 * self.width + x as u32) * 4) as usize;
         let a = a.min(1.0);
         let p = &mut self.pixels[i..i + 4];
-        p[0] = (p[0] as f32 * (1.0 - a) + c.0 as f32 * a) as u8;
-        p[1] = (p[1] as f32 * (1.0 - a) + c.1 as f32 * a) as u8;
-        p[2] = (p[2] as f32 * (1.0 - a) + c.2 as f32 * a) as u8;
+        if p[3] == 255 {
+            // Opaque destination (every page): plain "over".
+            p[0] = (p[0] as f32 * (1.0 - a) + c.0 as f32 * a) as u8;
+            p[1] = (p[1] as f32 * (1.0 - a) + c.1 as f32 * a) as u8;
+            p[2] = (p[2] as f32 * (1.0 - a) + c.2 as f32 * a) as u8;
+        } else {
+            // Transparent tiles (PDF export of text effects): full alpha compositing.
+            let da = p[3] as f32 / 255.0;
+            let oa = a + da * (1.0 - a);
+            if oa <= 0.0 {
+                return;
+            }
+            for (k, cc) in [c.0, c.1, c.2].into_iter().enumerate() {
+                p[k] = ((cc as f32 * a + p[k] as f32 * da * (1.0 - a)) / oa).round().min(255.0) as u8;
+            }
+            p[3] = (oa * 255.0).round() as u8;
+        }
     }
 
     fn fill_rect(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, c: Color) {
@@ -471,7 +485,22 @@ impl Renderer {
             px[3] = 255;
         }
         let mut r = Raster { width, height, pixels };
-        for it in &page.items {
+        self.paint(&mut r, &page.items, scale);
+        r
+    }
+
+    /// Draw `items` onto a fully transparent `width` x `height` pt raster (used by
+    /// the PDF export for text with effects, so what's underneath still shows).
+    pub fn render_transparent(&mut self, items: &[Item], width: f32, height: f32, scale: f32) -> Raster {
+        let w = (width * scale).ceil().max(1.0) as u32;
+        let h = (height * scale).ceil().max(1.0) as u32;
+        let mut r = Raster { width: w, height: h, pixels: vec![0u8; (w * h * 4) as usize] };
+        self.paint(&mut r, items, scale);
+        r
+    }
+
+    fn paint(&mut self, r: &mut Raster, items: &[Item], scale: f32) {
+        for it in items {
             match it {
                 Item::Rect { x, y, w, h, color } => {
                     r.fill_rect(x * scale, y * scale, (x + w) * scale, (y + h) * scale, *color);
@@ -495,7 +524,7 @@ impl Renderer {
                         }
                     }
                     if let Some(rich) = &fx.rich {
-                        render_rich(&mut r, &run, iby, bold_off, italic, *color, px, scale, rich);
+                        render_rich(r, &run, iby, bold_off, italic, *color, px, scale, rich);
                         continue;
                     }
                     // Effect offset in device pixels: about 1/22 em, never under a pixel.
@@ -510,28 +539,28 @@ impl Renderer {
                         let dark = if color.luminance() < 0.45 { Color(0x50, 0x50, 0x50) } else { mix(*color, Color::BLACK, 0.55) };
                         let fill = mix(*color, Color::WHITE, 0.72);
                         let s = if fx.emboss { 1 } else { -1 };
-                        stamp_all(&mut r, &run, s * d, s * d, dark, 0.6);
-                        stamp_all(&mut r, &run, -s * d, -s * d, Color::WHITE, 0.9);
-                        stamp_all(&mut r, &run, 0, 0, fill, 1.0);
+                        stamp_all(r, &run, s * d, s * d, dark, 0.6);
+                        stamp_all(r, &run, -s * d, -s * d, Color::WHITE, 0.9);
+                        stamp_all(r, &run, 0, 0, fill, 1.0);
                         continue;
                     }
                     if fx.shadow {
-                        stamp_all(&mut r, &run, d, d, Color(0x80, 0x80, 0x80), 0.75);
+                        stamp_all(r, &run, d, d, Color(0x80, 0x80, 0x80), 0.75);
                     }
                     if fx.outline {
                         // Hollow letters: an outer stroke in the text colour, interior left open.
                         let rw = (px / 40.0).round().max(1.0) as i32;
                         if fx.shadow {
                             // Keep the shadow from showing through the hollow interior.
-                            stamp_all(&mut r, &run, 0, 0, Color::WHITE, 1.0);
+                            stamp_all(r, &run, 0, 0, Color::WHITE, 1.0);
                         }
                         for (ix, g) in &run {
                             let ring = ring(g, rw, bold_off.round() as i32);
-                            stamp(&mut r, &ring, *ix, iby, 0.0, italic, *color, 1.0);
+                            stamp(r, &ring, *ix, iby, 0.0, italic, *color, 1.0);
                         }
                         continue;
                     }
-                    stamp_all(&mut r, &run, 0, 0, *color, 1.0);
+                    stamp_all(r, &run, 0, 0, *color, 1.0);
                 }
                 Item::Image { key, data, x, y, w, h, crop } => {
                     let dw = (w * scale).round().max(1.0) as u32;
@@ -589,13 +618,12 @@ impl Renderer {
                                 r.blend(ox + ix as i32, oy + iy as i32, Color(p[0], p[1], p[2]), a);
                             }
                         }
-                        None => draw_placeholder(&mut r, x * scale, y * scale, w * scale, h * scale),
+                        None => draw_placeholder(r, x * scale, y * scale, w * scale, h * scale),
                     }
                 }
-                Item::Placeholder { x, y, w, h, .. } => draw_placeholder(&mut r, x * scale, y * scale, w * scale, h * scale),
+                Item::Placeholder { x, y, w, h, .. } => draw_placeholder(r, x * scale, y * scale, w * scale, h * scale),
             }
         }
-        r
     }
 }
 

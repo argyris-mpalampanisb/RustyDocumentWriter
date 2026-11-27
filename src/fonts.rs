@@ -167,6 +167,11 @@ impl LoadedFont {
         if seen.is_empty() { None } else { Some(0.0) }
     }
 
+    /// The font file and the face's index in it (for embedding, e.g. in PDF).
+    pub fn file(&self) -> (&'static [u8], u32) {
+        (self.data, self.face_index)
+    }
+
     pub fn has_glyph(&self, c: char) -> bool {
         self.glyph(c).0 .0 != 0
     }

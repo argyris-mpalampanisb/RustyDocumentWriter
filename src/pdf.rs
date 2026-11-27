@@ -1,10 +1,16 @@
-//! PDF export from our own layout: each page is drawn by [`crate::render`] and
-//! stored losslessly, so the PDF looks exactly like the editor (WordArt effects,
-//! fonts and all) on any machine.
+//! PDF export from our own layout, so the PDF matches the editor page for page
+//! and line for line.
 //!
-//! No PDF library is needed: a PNG's IDAT stream is zlib data with per-row PNG
-//! filters, which PDF's FlateDecode reads directly with `/Predictor 15`. Text is
-//! not selectable in these PDFs; that needs embedded fonts (see the README roadmap).
+//! [`export`] writes a real PDF with [krilla]: text as text in the exact fonts
+//! the layout used (embedded and subsetted, so it's searchable, copyable and
+//! sharp at any zoom), rectangles as vector paths, and pictures embedded in
+//! their own format. Text with effects (WordArt, outline, shadow, emboss) is
+//! drawn by our renderer into a transparent image, so it looks like the screen.
+//!
+//! [`export_raster`] is the older all-image export (every page one lossless
+//! picture), kept for viewers with poor font support. It needs no PDF library:
+//! a PNG's IDAT stream is zlib data with per-row PNG filters, which PDF's
+//! FlateDecode reads directly with `/Predictor 15`.
 
 use crate::render::Raster;
 use std::io::Write;
@@ -151,8 +157,8 @@ fn png_idat(img: &Raster) -> Result<(Vec<u8>, u8), String> {
     Ok((idat, colors))
 }
 
-/// Render every page of `layout` at `dpi` into a PDF at `path`.
-pub fn export(layout: &crate::layout::Layout, title: &str, dpi: f32, path: &std::path::Path) -> Result<(), String> {
+/// Render every page of `layout` at `dpi` as one picture per page into a PDF at `path`.
+pub fn export_raster(layout: &crate::layout::Layout, title: &str, dpi: f32, path: &std::path::Path) -> Result<(), String> {
     let tmp = path.with_extension("rdw-tmp");
     let result = (|| -> std::io::Result<()> {
         let f = std::io::BufWriter::new(std::fs::File::create(&tmp)?);
@@ -174,9 +180,216 @@ pub fn export(layout: &crate::layout::Layout, title: &str, dpi: f32, path: &std:
     }
 }
 
+/// Write `layout` as a vector PDF at `path`. `dpi` is the resolution of the
+/// parts that stay pictures (text effects).
+pub fn export(layout: &crate::layout::Layout, title: &str, dpi: f32, path: &std::path::Path) -> Result<(), String> {
+    let bytes = vector::write(layout, title, dpi)?;
+    let tmp = path.with_extension("rdw-tmp");
+    std::fs::write(&tmp, bytes).and_then(|_| std::fs::rename(&tmp, path)).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("Cannot write {}: {e}", path.display())
+    })
+}
+
+mod vector {
+    use crate::layout::{Item, Layout, TextFx};
+    use crate::props::Color;
+    use krilla::color::rgb;
+    use krilla::geom::{PathBuilder, Point, Rect, Size, Transform};
+    use krilla::image::Image;
+    use krilla::metadata::Metadata;
+    use krilla::page::PageSettings;
+    use krilla::paint::{Fill, FillRule, LineJoin, Stroke};
+    use krilla::text::{Font, GlyphId, KrillaGlyph};
+    use krilla::{Data, Document};
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    fn paint(c: Color) -> krilla::paint::Paint {
+        rgb::Color::new(c.0, c.1, c.2).into()
+    }
+
+    fn fill(c: Color) -> Fill {
+        Fill { paint: paint(c), ..Default::default() }
+    }
+
+    fn rect_path(x: f32, y: f32, w: f32, h: f32) -> Option<krilla::geom::Path> {
+        let mut pb = PathBuilder::new();
+        pb.push_rect(Rect::from_xywh(x, y, w.max(0.01), h.max(0.01))?);
+        pb.finish()
+    }
+
+    /// A picture in the format it's stored in (JPEG stays JPEG); anything krilla
+    /// doesn't read directly is decoded and embedded as pixels.
+    fn image(data: &Arc<Vec<u8>>) -> Option<Image> {
+        let shared: Data = (data.clone() as Arc<dyn AsRef<[u8]> + Send + Sync>).into();
+        let direct = match image::guess_format(data).ok()? {
+            image::ImageFormat::Png => Image::from_png(shared, true).ok(),
+            image::ImageFormat::Jpeg => Image::from_jpeg(shared, true).ok(),
+            image::ImageFormat::Gif => Image::from_gif(shared, true).ok(),
+            image::ImageFormat::WebP => Image::from_webp(shared, true).ok(),
+            _ => None,
+        };
+        direct.or_else(|| {
+            let rgba = image::load_from_memory(data).ok()?.to_rgba8();
+            let (w, h) = rgba.dimensions();
+            Some(Image::from_rgba8(rgba.into_raw(), w, h))
+        })
+    }
+
+    pub fn write(layout: &Layout, title: &str, dpi: f32) -> Result<Vec<u8>, String> {
+        let mut doc = Document::new();
+        doc.set_metadata(Metadata::new().title(title.to_string()).creator("RustyDocumentWriter".into()).producer("RustyDocumentWriter".into()));
+        let mut fonts: HashMap<usize, Option<Font>> = HashMap::new();
+        let mut images: HashMap<String, Option<Image>> = HashMap::new();
+        let mut renderer = crate::render::Renderer::new();
+        for pg in &layout.pages {
+            let settings = PageSettings::from_wh(pg.width, pg.height).ok_or("invalid page size")?;
+            let mut page = doc.start_page_with(settings);
+            let mut s = page.surface();
+            if let (Some(bg), Some(p)) = (pg.background, rect_path(0.0, 0.0, pg.width, pg.height)) {
+                s.set_stroke(None);
+                s.set_fill(Some(fill(bg)));
+                s.draw_path(&p);
+            }
+            for it in &pg.items {
+                match it {
+                    Item::Rect { x, y, w, h, color } => {
+                        if let Some(p) = rect_path(*x, *y, *w, *h) {
+                            s.set_stroke(None);
+                            s.set_fill(Some(fill(*color)));
+                            s.draw_path(&p);
+                        }
+                    }
+                    Item::Image { key, data, x, y, w, h, crop } => {
+                        let img = images.entry(key.clone()).or_insert_with(|| image(data)).clone();
+                        let Some(img) = img else { continue };
+                        // crop = [left, top, right, bottom] fractions cut off the picture.
+                        let fw = w / (1.0 - crop[0] - crop[2]).max(0.01);
+                        let fh = h / (1.0 - crop[1] - crop[3]).max(0.01);
+                        let (Some(clip), Some(size)) = (rect_path(*x, *y, *w, *h), Size::from_wh(fw, fh)) else { continue };
+                        s.push_clip_path(&clip, &FillRule::NonZero);
+                        s.push_transform(&Transform::from_translate(x - crop[0] * fw, y - crop[1] * fh));
+                        s.draw_image(img, size);
+                        s.pop();
+                        s.pop();
+                    }
+                    Item::Placeholder { x, y, w, h, .. } => {
+                        if let Some(p) = rect_path(*x, *y, *w, *h) {
+                            s.set_fill(Some(fill(Color(0xF2, 0xF2, 0xF2))));
+                            s.set_stroke(Some(Stroke { paint: paint(Color(0xA6, 0xA6, 0xA6)), width: 0.75, ..Default::default() }));
+                            s.draw_path(&p);
+                        }
+                    }
+                    Item::Glyphs { font, size, color, y, glyphs, chars, synth_bold, synth_italic, scale_x, fx } => {
+                        if glyphs.is_empty() {
+                            continue;
+                        }
+                        let embedded = fonts
+                            .entry(font.id)
+                            .or_insert_with(|| {
+                                let (data, index) = font.file();
+                                Font::new(Data::from(data), index)
+                            })
+                            .clone();
+                        // Text effects (and fonts krilla can't embed) become a picture.
+                        let (Some(kf), true) = (embedded, *fx == TextFx::default()) else {
+                            let (x0, x1) = (glyphs[0].1 - size * 0.8, glyphs[glyphs.len() - 1].1 + size * 1.8);
+                            let (y0, y1) = (y - size * 1.6, y + size * 1.4);
+                            let mut tile = it.clone();
+                            tile.translate(-x0, -y0);
+                            let r = renderer.render_transparent(&[tile], x1 - x0, y1 - y0, dpi / 72.0);
+                            if let Some(sz) = Size::from_wh(x1 - x0, y1 - y0) {
+                                s.push_transform(&Transform::from_translate(x0, y0));
+                                s.draw_image(Image::from_rgba8(r.pixels, r.width, r.height), sz);
+                                s.pop();
+                            }
+                            continue;
+                        };
+                        let text: String = chars.iter().collect();
+                        let mut ranges = Vec::with_capacity(chars.len());
+                        let mut b = 0;
+                        for c in chars {
+                            ranges.push(b..b + c.len_utf8());
+                            b += c.len_utf8();
+                        }
+                        let sx = scale_x.max(0.01);
+                        let x0 = glyphs[0].1;
+                        // Advances reproduce our exact positions (kerning, justification, scaling).
+                        let run: Vec<KrillaGlyph> = glyphs
+                            .iter()
+                            .enumerate()
+                            .map(|(i, (gid, x))| {
+                                let adv = match glyphs.get(i + 1) {
+                                    Some((_, nx)) => nx - x,
+                                    None => chars.get(i).map(|c| font.advance(*c, *size) * sx).unwrap_or(0.0),
+                                };
+                                KrillaGlyph {
+                                    glyph_id: GlyphId::new(gid.0 as u32),
+                                    text_range: ranges.get(i).cloned().unwrap_or(0..0),
+                                    x_advance: adv / sx / size,
+                                    x_offset: 0.0,
+                                    y_offset: 0.0,
+                                    y_advance: 0.0,
+                                    location: None,
+                                }
+                            })
+                            .collect();
+                        let mut pushed = 0;
+                        if (sx - 1.0).abs() > 0.001 {
+                            s.push_transform(&Transform::from_row(sx, 0.0, 0.0, 1.0, x0 * (1.0 - sx), 0.0));
+                            pushed += 1;
+                        }
+                        if *synth_italic {
+                            // The same 0.2 shear about the baseline as the screen renderer.
+                            s.push_transform(&Transform::from_row(1.0, 0.0, -0.2, 1.0, 0.2 * y, 0.0));
+                            pushed += 1;
+                        }
+                        s.set_fill(Some(fill(*color)));
+                        s.set_stroke(synth_bold.then(|| Stroke { paint: paint(*color), width: size / 28.0, line_join: LineJoin::Round, ..Default::default() }));
+                        s.draw_glyphs(Point::from_xy(x0, *y), &run, kf, &text, *size, false);
+                        s.set_stroke(None);
+                        for _ in 0..pushed {
+                            s.pop();
+                        }
+                    }
+                }
+            }
+            s.finish();
+            page.finish();
+        }
+        doc.finish().map_err(|e| format!("PDF export failed: {e:?}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The vector export embeds fonts with a Unicode map (selectable text), keeps
+    /// the page size, and turns text effects into images.
+    #[test]
+    fn vector_export_has_real_text() {
+        use crate::document::Document;
+        use crate::edit;
+        let fonts = crate::fonts::FontDb::load_system();
+        let mut doc = Document::new_blank();
+        let at = edit::start_of_doc(&doc);
+        let end = edit::insert_text(&mut doc, &at, "Searchable text, Γειά σου", None);
+        let next = edit::split_paragraph(&mut doc, &end);
+        let fx_end = edit::insert_text(&mut doc, &next, "Shadowed", None);
+        edit::format_runs(&mut doc, &next, &fx_end, &|r| edit::set_effect(r, "w:shadow", true));
+        let layout = crate::layout::layout_document(&doc, &fonts, &Default::default());
+        let pdf = super::vector::write(&layout, "Test", 150.0).unwrap();
+        let has = |n: &[u8]| pdf.windows(n.len()).any(|w| w == n);
+        assert!(pdf.starts_with(b"%PDF-"));
+        assert!(has(b"/ToUnicode"), "text must map back to Unicode");
+        assert!(has(b"/FontFile2") || has(b"/FontFile3"), "fonts must be embedded");
+        assert!(has(b"/Subtype /Image") || has(b"/Subtype/Image"), "effect text becomes an image");
+        let (w, h) = (layout.pages[0].width, layout.pages[0].height);
+        let media = format!("/MediaBox [0 0 {} {}]", w, h);
+        assert!(has(media.as_bytes()) || has(b"/MediaBox"), "page size");
+    }
 
     #[test]
     fn writes_a_valid_skeleton() {

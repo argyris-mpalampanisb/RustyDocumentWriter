@@ -57,12 +57,14 @@ fn render(doc: &Document, fonts: &FontDb, art: &WordArt, scale: f32) -> egui::Co
             glyphs.push((fm.font.glyph(c).0, x));
             x += fm.font.advance(c, size);
         }
+        let chars: Vec<char> = l.chars().collect();
         items.push(Item::Glyphs {
             font: fm.font.clone(),
             size,
             color: rp.color.unwrap_or(Color::BLACK),
             y: pad + line_h * i as f32 + fm.font.ascent(size),
             glyphs,
+            chars,
             synth_bold: fm.synth_bold,
             synth_italic: fm.synth_italic,
             scale_x: 1.0,

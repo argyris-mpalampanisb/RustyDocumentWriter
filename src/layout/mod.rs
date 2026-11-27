@@ -60,6 +60,9 @@ pub enum Item {
         color: Color,
         y: f32,
         glyphs: Vec<(ab_glyph::GlyphId, f32)>,
+        /// The character each glyph shows (same length as `glyphs`), so exports
+        /// such as PDF can keep the text searchable and copyable.
+        chars: Vec<char>,
         synth_bold: bool,
         synth_italic: bool,
         scale_x: f32,

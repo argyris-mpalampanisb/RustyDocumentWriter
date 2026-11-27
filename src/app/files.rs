@@ -15,7 +15,7 @@ use std::time::Instant;
 pub const WORD_EXTS: &[&str] = &["docx", "docm", "dotx", "dotm"];
 /// Other documents, opened by converting them with LibreOffice.
 pub const IMPORT_EXTS: &[&str] = &["doc", "odt", "rtf", "html", "htm", "txt"];
-/// Resolution of exported PDFs (good for printing; a text page is ~250 KB).
+/// Resolution of the parts of an exported PDF that stay pictures (text effects).
 const PDF_DPI: f32 = 200.0;
 
 pub enum Done {

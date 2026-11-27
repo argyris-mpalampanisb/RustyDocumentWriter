@@ -90,7 +90,7 @@ We open the test documents in a **reference word processor**, record where every
 - ✏️ Tracked changes (insertions shown, deletions hidden)
 - 🀄 East Asian document grids
 - 📥 Opens .docx, .docm, .dotx and .dotm natively, and .doc, .odt, .rtf, .html and .txt by converting them with [LibreOffice](https://www.libreoffice.org) when it's installed
-- 📤 Exports to PDF exactly as laid out on screen (no LibreOffice needed), and to .odt, .doc, .rtf, .html and .txt
+- 📤 Exports to PDF exactly as laid out on screen, with real, searchable text in embedded (subsetted) fonts and pictures in their own format (no LibreOffice needed), and to .odt, .doc, .rtf, .html and .txt
 - 💾 Save as document, template or macro-enabled; saving copies every untouched part straight from the original file, still compressed
 
 </td>
@@ -167,7 +167,7 @@ cargo test                               # 🧪 unit + layout-fidelity tests
 Convert files from the command line with the editor's own import, layout and export:
 
 ```bash
-rusty-document-writer-convert report.docx report.pdf            # 📄 PDF, exactly as laid out
+rusty-document-writer-convert report.docx report.pdf            # 📄 PDF, exactly as laid out (--raster: pages as pictures)
 rusty-document-writer-convert --to docx *.doc *.odt *.rtf       # 📥 batch-convert to .docx (LibreOffice)
 rusty-document-writer-convert notes.docx notes.txt --dpi 200    # also .png pages, .odt, .doc, .rtf, .html
 ```
@@ -203,7 +203,7 @@ src/
 ├── 🧩 xml.rs        lossless XML DOM, tailored to OOXML
 ├── 📦 opc.rs        zip package; untouched parts copied still compressed
 ├── 🔄 convert.rs    format detection; .doc/.odt/.rtf… through LibreOffice
-├── 🖨️ pdf.rs        PDF export of the rendered pages
+├── 🖨️ pdf.rs        PDF export: embedded fonts, vector text and shapes
 ├── 🌳 model.rs      editable paragraphs / runs / tables
 ├── 🎨 props.rs      the DOCX formatting cascade, themes, numbering
 ├── 📄 document.rs   load · save · new (modern Normal template)
@@ -225,7 +225,7 @@ src/
 - [ ] 🌍 Complex scripts (Arabic, Hebrew, Indic) via shaping + BiDi
 - [ ] 📋 Rich clipboard (paste with formatting)
 - [ ] 💬 Comments & track-changes UI
-- [ ] 🖨️ Printing, and PDFs with selectable text (embedded fonts)
+- [ ] 🖨️ Printing
 - [ ] ⚡ Incremental layout for huge documents
 - [ ] 🧮 Table editing (rows, columns, resizing)
 - [ ] 📊 Charts, SmartArt & equations rendering

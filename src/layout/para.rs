@@ -1075,6 +1075,7 @@ pub fn emit_line(
                 size: st.size,
                 color: st.rp.color.unwrap_or(auto_color(para_bg)),
                 y: base,
+                chars: vec![ch; glyphs.len()],
                 glyphs,
                 synth_bold: f.synth_bold,
                 synth_italic: f.synth_italic,
@@ -1094,6 +1095,7 @@ pub fn emit_line(
                 color: a.st.rp.color.unwrap_or(auto_color(para_bg)),
                 y: base - a.st.raise,
                 glyphs: vec![(gid, ox + x)],
+                chars: vec![ch],
                 synth_bold: f.synth_bold,
                 synth_italic: f.synth_italic,
                 scale_x: a.st.rp.scale / 100.0,
@@ -1111,6 +1113,7 @@ pub fn emit_line(
                 let f = a.font.clone().unwrap();
                 let color = a.st.rp.color.unwrap_or(auto_color(a.st.rp.highlight.or(a.st.rp.shading).or(para_bg)));
                 let mut glyphs = Vec::new();
+                let mut chars = Vec::new();
                 let mut kk = k;
                 while kk < atoms.len() {
                     let b = &atoms[kk];
@@ -1124,6 +1127,7 @@ pub fn emit_line(
                     if let Some(ch) = b.glyph {
                         if ch != '\u{00AD}' {
                             glyphs.push((f.font.glyph(ch).0, ox + line.xs[kk]));
+                            chars.push(ch);
                         }
                     }
                     kk += 1;
@@ -1135,6 +1139,7 @@ pub fn emit_line(
                         color,
                         y: base - a.st.raise,
                         glyphs,
+                        chars,
                         synth_bold: f.synth_bold,
                         synth_italic: f.synth_italic,
                         scale_x: a.st.rp.scale / 100.0,
@@ -1273,7 +1278,7 @@ pub fn emit_line(
         let mf = &m.mark.fm[0];
         let push_mark = |ch: char, x: f32, size: f32, items: &mut Vec<Item>| {
             let fm = if mf.font.has_glyph(ch) { mf.clone() } else { ctx.fonts.fallback_for(ch, false, false).unwrap_or(mf.clone()) };
-            items.push(Item::Glyphs { font: fm.font.clone(), size, color: mark_color, y: base, glyphs: vec![(fm.font.glyph(ch).0, x)], synth_bold: false, synth_italic: false, scale_x: 1.0, fx: TextFx::default() });
+            items.push(Item::Glyphs { font: fm.font.clone(), size, color: mark_color, y: base, glyphs: vec![(fm.font.glyph(ch).0, x)], chars: vec![ch], synth_bold: false, synth_italic: false, scale_x: 1.0, fx: TextFx::default() });
         };
         for (k, a) in atoms.iter().enumerate() {
             match a.kind {
