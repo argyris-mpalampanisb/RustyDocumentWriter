@@ -2944,6 +2944,7 @@ dependencies = [
  "image",
  "krilla",
  "rfd",
+ "sys-locale",
  "ttf-parser",
  "zip",
 ]

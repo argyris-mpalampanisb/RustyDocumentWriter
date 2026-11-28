@@ -4,7 +4,7 @@
 //! shows is exactly what lands on the page.
 
 use super::theme::*;
-use super::{App, Cmd};
+use super::{tr, App, Cmd};
 use egui::{vec2, Color32, Sense, Stroke, StrokeKind, Ui};
 use rusty_document_writer::document::Document;
 use rusty_document_writer::fonts::FontDb;
@@ -114,7 +114,7 @@ fn tile(ui: &mut Ui, tex: &egui::TextureHandle, name: &str, selected: bool) -> b
     let sz = tex.size_vec2();
     let k = (60.0 / sz.x).min(50.0 / sz.y).min(1.0);
     p.image(tex.id(), egui::Rect::from_center_size(rect.center(), sz * k), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
-    r.on_hover_text(name).clicked()
+    r.on_hover_text(tr(name)).clicked()
 }
 
 fn gallery(ui: &mut Ui, tiles: &[egui::TextureHandle], selected: Option<usize>, mut on_pick: impl FnMut(usize)) {
@@ -163,12 +163,12 @@ pub fn dialog(app: &mut App, ctx: &egui::Context, cmds: &mut Vec<Cmd>) {
         ed.preview = Some((ed.art.clone(), ctx.load_texture("wordart-preview", img, egui::TextureOptions::LINEAR)));
     }
     let (mut ok, mut cancel) = (false, false);
-    let title = if ed.target.is_some() { "Edit WordArt" } else { "Insert WordArt" };
+    let title = tr(if ed.target.is_some() { "Edit WordArt" } else { "Insert WordArt" });
     egui::Modal::new(egui::Id::NULL.with("wordart-dialog")).show(ctx, |ui| {
         ui.set_width(560.0);
         ui.heading(title);
         ui.add_space(6.0);
-        ui.label("Text");
+        ui.label(tr("Text"));
         let te = ui.add(egui::TextEdit::multiline(&mut ed.art.text).desired_rows(2).desired_width(f32::INFINITY).font(egui::TextStyle::Heading));
         if ed.first_frame {
             te.request_focus();
@@ -182,7 +182,7 @@ pub fn dialog(app: &mut App, ctx: &egui::Context, cmds: &mut Vec<Cmd>) {
         }
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            ui.label("Font");
+            ui.label(tr("Font"));
             egui::ComboBox::from_id_salt("wordart-font").width(180.0).height(300.0).selected_text(ed.art.font.clone()).show_ui(ui, |ui| {
                 for f in font_names {
                     if ui.selectable_label(*f == ed.art.font, f).clicked() {
@@ -191,18 +191,18 @@ pub fn dialog(app: &mut App, ctx: &egui::Context, cmds: &mut Vec<Cmd>) {
                 }
             });
             ui.add_space(12.0);
-            ui.label("Size");
+            ui.label(tr("Size"));
             ui.add(egui::DragValue::new(&mut ed.art.size).range(8.0..=200.0).speed(0.5).suffix(" pt"));
         });
         ui.add_space(6.0);
-        ui.label("Style");
+        ui.label(tr("Style"));
         let mut pick = None;
         gallery(ui, tiles, Some(ed.art.style), |i| pick = Some(i));
         if let Some(i) = pick {
             ed.art.style = i;
         }
         ui.add_space(6.0);
-        ui.label("Preview");
+        ui.label(tr("Preview"));
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 150.0), Sense::hover());
         ui.painter().rect_filled(rect, 4.0, Color32::WHITE);
         if let Some((_, tex)) = &ed.preview {
@@ -212,10 +212,10 @@ pub fn dialog(app: &mut App, ctx: &egui::Context, cmds: &mut Vec<Cmd>) {
         }
         ui.add_space(10.0);
         ui.horizontal(|ui| {
-            if ui.button("  OK  ").clicked() {
+            if ui.button(format!("  {}  ", tr("OK"))).clicked() {
                 ok = true;
             }
-            if ui.button("  Cancel  ").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if ui.button(format!("  {}  ", tr("Cancel"))).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 cancel = true;
             }
         });

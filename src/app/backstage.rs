@@ -2,7 +2,7 @@
 
 use super::icons::{self, Icon};
 use super::theme::{self, *};
-use super::{App, Cmd};
+use super::{i18n, tf, tr, App, Cmd};
 use egui::{pos2, vec2, Align2, Color32, Rect, Sense, Stroke, StrokeKind, Ui};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -37,14 +37,14 @@ pub fn show(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
         if let Some(ic) = icon {
             icons::paint(ui.painter(), ic, Rect::from_center_size(pos2(rect.left() + 28.0, rect.center().y), vec2(18.0, 18.0)), pal().text);
         }
-        ui.painter().text(pos2(rect.left() + 52.0, rect.center().y), Align2::LEFT_CENTER, label, theme::ui_font(14.0), pal().text);
+        ui.painter().text(pos2(rect.left() + 52.0, rect.center().y), Align2::LEFT_CENTER, tr(label), theme::ui_font(14.0), pal().text);
         r.clicked()
     };
     if item(&mut sui, "Back", Some(Icon::Prev), false) {
         app.backstage = false;
     }
     sui.add_space(8.0);
-    if item(&mut sui, "Home", Some(Icon::Generic), page == Page::Home) {
+    if item(&mut sui, "file\u{4}Home", Some(Icon::Generic), page == Page::Home) {
         page = Page::Home;
     }
     if item(&mut sui, "New", Some(Icon::BlankPage), page == Page::New) {
@@ -88,7 +88,7 @@ pub fn show(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
     let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(content.shrink2(vec2(40.0, 30.0))));
     match page {
         Page::Home | Page::New => {
-            cui.label(egui::RichText::new(if page == Page::Home { "Good day" } else { "New" }).size(26.0).color(pal().text));
+            cui.label(egui::RichText::new(tr(if page == Page::Home { "Good day" } else { "New" })).size(26.0).color(pal().text));
             cui.add_space(16.0);
             let (rect, r) = cui.allocate_exact_size(vec2(150.0, 194.0), Sense::click());
             let pg = Rect::from_min_size(rect.min, vec2(150.0, 170.0));
@@ -96,7 +96,7 @@ pub fn show(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
             if r.hovered() {
                 cui.painter().rect_stroke(pg, 2.0, Stroke::new(2.0, pal().accent), StrokeKind::Outside);
             }
-            cui.painter().text(pos2(rect.center().x, pg.bottom() + 14.0), Align2::CENTER_CENTER, "Blank document", theme::ui_font(13.0), pal().text);
+            cui.painter().text(pos2(rect.center().x, pg.bottom() + 14.0), Align2::CENTER_CENTER, tr("Blank document"), theme::ui_font(13.0), pal().text);
             if r.clicked() {
                 cmds.push(Cmd::New);
                 app.backstage = false;
@@ -107,9 +107,9 @@ pub fn show(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
             }
         }
         Page::Open => {
-            cui.label(egui::RichText::new("Open").size(26.0).color(pal().text));
+            cui.label(egui::RichText::new(tr("Open")).size(26.0).color(pal().text));
             cui.add_space(16.0);
-            if cui.add(egui::Button::new(egui::RichText::new("  Browse…  ").size(14.0)).min_size(vec2(140.0, 34.0))).clicked() {
+            if cui.add(egui::Button::new(egui::RichText::new(format!("  {}  ", tr("Browse…"))).size(14.0)).min_size(vec2(140.0, 34.0))).clicked() {
                 cmds.push(Cmd::Open);
             }
             cui.add_space(20.0);
@@ -118,32 +118,32 @@ pub fn show(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
         Page::Theme => theme_page(app, &mut cui),
         Page::Options => options_page(app, &mut cui),
         Page::Info => {
-            cui.label(egui::RichText::new("Info").size(26.0).color(pal().text));
+            cui.label(egui::RichText::new(tr("Info")).size(26.0).color(pal().text));
             cui.add_space(12.0);
-            let path = app.doc.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "Not saved yet".into());
+            let path = app.doc.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| tr("Not saved yet").into());
             cui.label(egui::RichText::new(app.doc.title()).size(18.0).color(pal().text));
             cui.label(egui::RichText::new(path).color(pal().text_dim));
             cui.add_space(16.0);
             let pages = app.layout.as_ref().map(|l| l.pages.len()).unwrap_or(0);
             egui::Grid::new("info").num_columns(2).spacing([30.0, 8.0]).show(&mut cui, |ui| {
-                ui.label("Pages");
+                ui.label(tr("Pages"));
                 ui.label(pages.to_string());
                 ui.end_row();
-                ui.label("Words");
+                ui.label(tr("Words"));
                 ui.label(app.word_count().to_string());
                 ui.end_row();
-                ui.label("Parts in package");
+                ui.label(tr("Parts in package"));
                 ui.label(app.doc.package.parts.len().to_string());
                 ui.end_row();
-                ui.label("Compatibility mode");
+                ui.label(tr("Compatibility mode"));
                 ui.label(match app.doc.settings.compat_mode {
-                    15 => "Mode 15 (current)".to_string(),
-                    14 => "Mode 14".to_string(),
-                    12 => "Mode 12".to_string(),
-                    n => format!("Legacy ({n})"),
+                    15 => tr("Mode 15 (current)").to_string(),
+                    14 => tr("Mode 14").to_string(),
+                    12 => tr("Mode 12").to_string(),
+                    n => tf("Legacy ({})", &[&n]),
                 });
                 ui.end_row();
-                ui.label("Styles");
+                ui.label(tr("Styles"));
                 ui.label(app.doc.styles.map.len().to_string());
                 ui.end_row();
             });
@@ -161,11 +161,11 @@ fn recent_list(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
     let width = ui.available_width().min(700.0);
     // Header row: "Recent" on the left, "Clear all" on the right.
     let (hdr, _) = ui.allocate_exact_size(vec2(width, 22.0), Sense::hover());
-    ui.painter().text(hdr.left_center(), Align2::LEFT_CENTER, "Recent", theme::ui_font(15.0), pal().text);
+    ui.painter().text(hdr.left_center(), Align2::LEFT_CENTER, tr("Recent"), theme::ui_font(15.0), pal().text);
     if !app.recent.is_empty() {
-        let galley = ui.painter().layout_no_wrap("Clear all".into(), theme::ui_font(12.5), pal().accent_text);
+        let galley = ui.painter().layout_no_wrap(tr("Clear all").into(), theme::ui_font(12.5), pal().accent_text);
         let cr = Rect::from_min_size(pos2(hdr.right() - galley.size().x - 8.0, hdr.center().y - 10.0), vec2(galley.size().x + 8.0, 20.0));
-        let r = ui.interact(cr, egui::Id::NULL.with("recent-clear"), Sense::click()).on_hover_text("Remove every document from the Recent list");
+        let r = ui.interact(cr, egui::Id::NULL.with("recent-clear"), Sense::click()).on_hover_text(tr("Remove every document from the Recent list"));
         if r.hovered() {
             ui.painter().rect_filled(cr, 3.0, pal().hover);
         }
@@ -176,7 +176,7 @@ fn recent_list(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
     }
     ui.add_space(6.0);
     if app.recent.is_empty() {
-        ui.label(egui::RichText::new("Documents you open will show up here.").color(pal().text_dim));
+        ui.label(egui::RichText::new(tr("Documents you open will show up here.")).color(pal().text_dim));
         return;
     }
     egui::ScrollArea::vertical().id_salt("recent-scroll").auto_shrink([false, true]).show(ui, |ui| {
@@ -192,7 +192,7 @@ fn recent_row(ui: &mut Ui, p: &std::path::Path, width: f32, cmds: &mut Vec<Cmd>)
     let (rect, r) = ui.allocate_exact_size(vec2(width, 44.0), Sense::click());
     // The remove button sits on top of the row, so it takes the click when hovered.
     let xr = Rect::from_center_size(pos2(rect.right() - 22.0, rect.center().y), vec2(26.0, 26.0));
-    let xresp = ui.interact(xr, egui::Id::NULL.with(("recent-remove", p)), Sense::click()).on_hover_text("Remove from list");
+    let xresp = ui.interact(xr, egui::Id::NULL.with(("recent-remove", p)), Sense::click()).on_hover_text(tr("Remove from list"));
     let row_hot = r.hovered() || xresp.hovered() || r.context_menu_opened();
     let painter = ui.painter_at(rect);
     if row_hot {
@@ -222,17 +222,17 @@ fn recent_row(ui: &mut Ui, p: &std::path::Path, width: f32, cmds: &mut Vec<Cmd>)
     let r = r.on_hover_text(p.display().to_string());
     r.context_menu(|ui| {
         ui.set_min_width(180.0);
-        if ui.button("Open").clicked() {
+        if ui.button(tr("Open")).clicked() {
             cmds.push(Cmd::OpenPath(p.to_path_buf()));
         }
-        if ui.button("Copy path").clicked() {
+        if ui.button(tr("Copy path")).clicked() {
             ui.ctx().copy_text(p.display().to_string());
         }
         ui.separator();
-        if ui.button("Remove from list").clicked() {
+        if ui.button(tr("Remove from list")).clicked() {
             cmds.push(Cmd::RemoveRecent(p.to_path_buf()));
         }
-        if ui.button("Clear all recent documents").clicked() {
+        if ui.button(tr("Clear all recent documents")).clicked() {
             cmds.push(Cmd::ClearRecent);
         }
     });
@@ -240,13 +240,13 @@ fn recent_row(ui: &mut Ui, p: &std::path::Path, width: f32, cmds: &mut Vec<Cmd>)
 
 /// File ▸ Theme: every UI theme as a miniature window, grouped by where it comes from.
 fn theme_page(app: &mut App, ui: &mut Ui) {
-    ui.label(egui::RichText::new("Theme").size(26.0).color(pal().text));
-    ui.label(egui::RichText::new("Colours for the ribbon, menus and the area around the pages. Your documents are not changed.").color(pal().text_dim));
+    ui.label(egui::RichText::new(tr("Theme")).size(26.0).color(pal().text));
+    ui.label(egui::RichText::new(tr("Colours for the ribbon, menus and the area around the pages. Your documents are not changed.")).color(pal().text_dim));
     if app.settings.follow_system {
         ui.label(
-            egui::RichText::new(format!(
+            egui::RichText::new(tf(
                 "Following your system's appearance: light mode uses {}, dark mode uses {}. Picking a theme replaces the one for its mode.",
-                app.settings.light_theme, app.settings.dark_theme
+                &[&tr(&app.settings.light_theme), &tr(&app.settings.dark_theme)],
             ))
             .color(pal().accent_text),
         );
@@ -276,16 +276,16 @@ fn theme_page(app: &mut App, ui: &mut Ui) {
 
 fn section(ui: &mut Ui, title: &str) {
     ui.add_space(14.0);
-    ui.label(egui::RichText::new(title).size(16.0).color(pal().text));
+    ui.label(egui::RichText::new(tr(title)).size(16.0).color(pal().text));
     let y = ui.cursor().top() + 2.0;
     ui.painter().hline(ui.max_rect().left()..=(ui.max_rect().left() + 520.0), y, Stroke::new(1.0, pal().sep));
     ui.add_space(8.0);
 }
 
 fn theme_combo(ui: &mut Ui, id: &str, value: &mut String, only_dark: Option<bool>) {
-    egui::ComboBox::from_id_salt(id).width(220.0).height(420.0).selected_text(value.clone()).show_ui(ui, |ui| {
+    egui::ComboBox::from_id_salt(id).width(220.0).height(420.0).selected_text(tr(value).to_string()).show_ui(ui, |ui| {
         for p in theme::PALETTES.iter().filter(|p| only_dark.is_none_or(|d| p.dark == d)) {
-            let label = format!("{}  ·  {}", p.name, p.source);
+            let label = format!("{}  ·  {}", tr(p.name), p.source);
             if ui.selectable_label(*value == p.name, label).clicked() {
                 *value = p.name.to_string();
             }
@@ -303,45 +303,59 @@ fn accent_chip(ui: &mut Ui, color: Color32, selected: bool, tip: &str) -> bool {
     } else if r.hovered() {
         p.circle_stroke(rect.center(), 12.5, Stroke::new(1.0, pal().border()));
     }
-    r.on_hover_text(tip).clicked()
+    r.on_hover_text(tr(tip)).clicked()
 }
 
 /// File ▸ Options: appearance, ribbon and status bar, editing.
 fn options_page(app: &mut App, ui: &mut Ui) {
-    ui.label(egui::RichText::new("Options").size(26.0).color(pal().text));
-    ui.label(egui::RichText::new("Changes apply right away and are remembered.").color(pal().text_dim));
+    ui.label(egui::RichText::new(tr("Options")).size(26.0).color(pal().text));
+    ui.label(egui::RichText::new(tr("Changes apply right away and are remembered.")).color(pal().text_dim));
     let mut s = app.settings.clone();
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        section(ui, "Language");
+        ui.horizontal(|ui| {
+            ui.label(tr("Interface language"));
+            let native = |l: i18n::Lang| i18n::LANGS.iter().find(|x| x.0 == l).map_or("", |x| x.2);
+            let system = tf("Same as the system ({})", &[&native(i18n::system())]);
+            let shown = i18n::from_code(&s.language).map_or(system.clone(), |l| native(l).to_string());
+            egui::ComboBox::from_id_salt("opt-language").width(220.0).selected_text(shown).show_ui(ui, |ui| {
+                ui.selectable_value(&mut s.language, "system".to_string(), system);
+                for (_, code, name) in i18n::LANGS {
+                    ui.selectable_value(&mut s.language, code.to_string(), *name);
+                }
+            });
+        });
+
         section(ui, "Appearance");
-        ui.radio_value(&mut s.follow_system, false, "Use one theme");
+        ui.radio_value(&mut s.follow_system, false, tr("Use one theme"));
         if !s.follow_system {
             ui.horizontal(|ui| {
                 ui.add_space(24.0);
                 theme_combo(ui, "opt-theme", &mut s.theme, None);
             });
         }
-        ui.radio_value(&mut s.follow_system, true, "Match the system's light or dark mode");
+        ui.radio_value(&mut s.follow_system, true, tr("Match the system's light or dark mode"));
         if s.follow_system {
             egui::Grid::new("opt-modes").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.add_space(24.0);
-                    ui.label("Light mode");
+                    ui.label(tr("Light mode"));
                 });
                 theme_combo(ui, "opt-light", &mut s.light_theme, Some(false));
                 ui.end_row();
                 ui.horizontal(|ui| {
                     ui.add_space(24.0);
-                    ui.label("Dark mode");
+                    ui.label(tr("Dark mode"));
                 });
                 theme_combo(ui, "opt-dark", &mut s.dark_theme, Some(true));
                 ui.end_row();
             });
             if ui.ctx().system_theme().is_none() {
-                ui.label(egui::RichText::new("Your system doesn't report light or dark mode, so the single theme above is used.").small().color(pal().text_dim));
+                ui.label(egui::RichText::new(tr("Your system doesn't report light or dark mode, so the single theme above is used.")).small().color(pal().text_dim));
             }
         }
         ui.add_space(10.0);
-        ui.label("Accent colour");
+        ui.label(tr("Accent colour"));
         ui.horizontal_wrapped(|ui| {
             let own = theme::PALETTES[theme::current()].accent;
             if accent_chip(ui, own, s.accent.is_none(), "The theme's own accent") {
@@ -354,12 +368,12 @@ fn options_page(app: &mut App, ui: &mut Ui) {
                 }
             }
             let mut custom = s.accent.unwrap_or(own);
-            if ui.color_edit_button_srgba(&mut custom).on_hover_text("Any colour").changed() {
+            if ui.color_edit_button_srgba(&mut custom).on_hover_text(tr("Any colour")).changed() {
                 s.accent = Some(custom);
             }
         });
         ui.add_space(10.0);
-        ui.label("Interface size");
+        ui.label(tr("Interface size"));
         ui.horizontal(|ui| {
             for &k in super::settings::SCALES {
                 if ui.selectable_label((s.ui_scale - k).abs() < 0.01, format!("{}%", (k * 100.0).round())).clicked() {
@@ -369,28 +383,28 @@ fn options_page(app: &mut App, ui: &mut Ui) {
         });
 
         section(ui, "Ribbon and status bar");
-        ui.checkbox(&mut s.ribbon_collapsed, "Collapse the ribbon to its tabs (Ctrl+F1, or double-click a tab)");
-        ui.checkbox(&mut s.show_status_bar, "Show the status bar");
+        ui.checkbox(&mut s.ribbon_collapsed, tr("Collapse the ribbon to its tabs (Ctrl+F1, or double-click a tab)"));
+        ui.checkbox(&mut s.show_status_bar, tr("Show the status bar"));
         ui.add_enabled_ui(s.show_status_bar, |ui| {
             ui.indent("status-items", |ui| {
-                ui.checkbox(&mut s.status_page, "Page number");
-                ui.checkbox(&mut s.status_words, "Word count");
-                ui.checkbox(&mut s.status_language, "Language");
-                ui.checkbox(&mut s.status_accessibility, "Accessibility");
-                ui.checkbox(&mut s.status_view, "View shortcuts");
-                ui.checkbox(&mut s.status_zoom, "Zoom slider");
-                ui.label(egui::RichText::new("Tip: right-click the status bar to change these too.").small().color(pal().text_dim));
+                ui.checkbox(&mut s.status_page, tr("Page number"));
+                ui.checkbox(&mut s.status_words, tr("Word count"));
+                ui.checkbox(&mut s.status_language, tr("Language"));
+                ui.checkbox(&mut s.status_accessibility, tr("Accessibility"));
+                ui.checkbox(&mut s.status_view, tr("View shortcuts"));
+                ui.checkbox(&mut s.status_zoom, tr("Zoom slider"));
+                ui.label(egui::RichText::new(tr("Tip: right-click the status bar to change these too.")).small().color(pal().text_dim));
             });
         });
 
         section(ui, "Editing");
-        ui.checkbox(&mut s.caret_blink, "Blinking cursor");
+        ui.checkbox(&mut s.caret_blink, tr("Blinking cursor"));
         ui.horizontal(|ui| {
-            ui.label("Cursor width");
+            ui.label(tr("Cursor width"));
             ui.add(egui::Slider::new(&mut s.caret_width, 1.0..=4.0).step_by(0.5).suffix(" px"));
         });
         ui.horizontal(|ui| {
-            ui.label("Zoom when starting");
+            ui.label(tr("Zoom when starting"));
             egui::ComboBox::from_id_salt("opt-zoom").selected_text(format!("{}%", (s.start_zoom * 100.0).round())).show_ui(ui, |ui| {
                 for z in [0.75f32, 1.0, 1.2, 1.5, 2.0] {
                     if ui.selectable_label((s.start_zoom - z).abs() < 0.01, format!("{}%", (z * 100.0).round())).clicked() {
@@ -399,12 +413,13 @@ fn options_page(app: &mut App, ui: &mut Ui) {
                 }
             });
         });
-        ui.checkbox(&mut s.show_ruler, "Show the ruler");
-        ui.checkbox(&mut s.show_nav, "Show the navigation pane");
+        ui.checkbox(&mut s.show_ruler, tr("Show the ruler"));
+        ui.checkbox(&mut s.show_nav, tr("Show the navigation pane"));
 
         ui.add_space(18.0);
-        if ui.button("Restore all defaults").clicked() {
-            s = super::settings::Settings::default();
+        if ui.button(tr("Restore all defaults")).clicked() {
+            // Keep the language: resetting it could switch to one the user can't read.
+            s = super::settings::Settings { language: s.language.clone(), ..Default::default() };
         }
         ui.add_space(20.0);
     });
@@ -455,7 +470,7 @@ fn theme_card(ui: &mut Ui, t: &theme::Palette, selected: bool) -> egui::Response
     }
     let outline = if selected { pal().accent_text } else if r.hovered() { pal().border() } else { pal().sep };
     p.rect_stroke(win, 6.0, Stroke::new(if selected { 2.5 } else { 1.0 }, outline), StrokeKind::Outside);
-    let label = if selected { format!("✓ {}", t.name) } else { t.name.to_string() };
+    let label = if selected { format!("✓ {}", tr(t.name)) } else { tr(t.name).to_string() };
     p.text(pos2(rect.left() + 2.0, win.bottom() + 15.0), Align2::LEFT_CENTER, label, theme::ui_font(13.0), if selected { pal().accent_text } else { pal().text });
-    r.on_hover_text(format!("{} ({})", t.name, if t.dark { "dark" } else { "light" }))
+    r.on_hover_text(format!("{} ({})", tr(t.name), tr(if t.dark { "dark" } else { "light" })))
 }

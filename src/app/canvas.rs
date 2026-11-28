@@ -1,7 +1,7 @@
 //! Page view: renders pages as textures and handles caret, selection and input.
 
 use super::theme::{self, *};
-use super::{App, Cmd};
+use super::{tr, App, Cmd};
 use egui::{pos2, vec2, Align2, Color32, Event, Key, Rect, Sense, Stroke, Ui};
 use std::time::{Duration, Instant};
 use rusty_document_writer::edit::{self, Pos};
@@ -400,17 +400,17 @@ pub fn document_area(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
         area.min.x = nav.right();
         let mut nui = ui.new_child(egui::UiBuilder::new().max_rect(nav.shrink(8.0)));
         nui.painter().rect_filled(nav, 0.0, pal().ribbon);
-        nui.label(egui::RichText::new("Navigation").size(16.0).color(pal().text));
+        nui.label(egui::RichText::new(tr("Navigation")).size(16.0).color(pal().text));
         nui.add_space(6.0);
         let mut find = app.find_text.clone();
-        if nui.add(egui::TextEdit::singleline(&mut find).hint_text("Search document").desired_width(f32::INFINITY)).changed() {
+        if nui.add(egui::TextEdit::singleline(&mut find).hint_text(tr("Search document")).desired_width(f32::INFINITY)).changed() {
             app.find_text = find;
         }
         nui.add_space(6.0);
         let outline = app.layout.as_ref().map(|l| l.outline.clone()).unwrap_or_default();
         egui::ScrollArea::vertical().id_salt("nav").show(&mut nui, |ui| {
             if outline.is_empty() {
-                ui.label(egui::RichText::new("Create an interactive outline of your document by applying Heading styles.").color(pal().text_dim).size(12.0));
+                ui.label(egui::RichText::new(tr("Create an interactive outline of your document by applying Heading styles.")).color(pal().text_dim).size(12.0));
             }
             for (text, lvl, _page, _y, path) in outline {
                 ui.horizontal(|ui| {
@@ -563,7 +563,7 @@ pub fn document_area(app: &mut App, ui: &mut Ui, cmds: &mut Vec<Cmd>) {
                         painter.hline(x..=(x + 4.0).min(sr.right()), y, Stroke::new(1.0, pal().accent));
                         x += 8.0;
                     }
-                    let label = if is_footer { "Footer" } else { "Header" };
+                    let label = tr(if is_footer { "Footer" } else { "Header" });
                     let lr = Rect::from_min_size(pos2(sr.left() + 4.0, if is_footer { y - 18.0 } else { y }), vec2(52.0, 18.0));
                     painter.rect_filled(lr, 2.0, Color32::from_rgb(0xD6, 0xE4, 0xF5));
                     painter.text(lr.center(), Align2::CENTER_CENTER, label, theme::ui_font(11.0), Color32::from_rgb(0x1F, 0x4E, 0x79));

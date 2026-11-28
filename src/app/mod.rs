@@ -7,7 +7,10 @@ mod ribbon;
 mod wordart_ui;
 pub mod theme;
 mod files;
+pub mod i18n;
 pub mod settings;
+
+pub use i18n::{tf, tr};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -638,9 +641,9 @@ impl App {
         let rp = res.run(&pp.style_id, rpr.as_ref(), None);
         let theme = &self.doc.theme;
         self.tb.font = if rp.font_ascii == theme.minor_latin {
-            format!("{} (Body)", rp.font_ascii)
+            tf("{} (Body)", &[&rp.font_ascii])
         } else if rp.font_ascii == theme.major_latin {
-            format!("{} (Headings)", rp.font_ascii)
+            tf("{} (Headings)", &[&rp.font_ascii])
         } else {
             rp.font_ascii.clone()
         };
@@ -718,14 +721,14 @@ impl App {
                 self.push_recent(&path);
                 if dropped_macros {
                     self.dialog = Dialog::Message(
-                        "Macros were removed".into(),
-                        "This type of file can't contain macros, so they were left out. To keep them, save as a Word Macro-Enabled Document (.docm).".into(),
+                        tr("Macros were removed").into(),
+                        tr("This type of file can't contain macros, so they were left out. To keep them, save as a Word Macro-Enabled Document (.docm).").into(),
                     );
                 }
                 true
             }
             Err(e) => {
-                self.dialog = Dialog::Message("Couldn't save the document".into(), e);
+                self.dialog = Dialog::Message(tr("Couldn't save the document").into(), e);
                 false
             }
         }
@@ -750,9 +753,9 @@ impl App {
                 }
                 let all: Vec<&str> = files::WORD_EXTS.iter().chain(files::IMPORT_EXTS).copied().collect();
                 let picked = rfd::FileDialog::new()
-                    .add_filter("All Documents", &all)
-                    .add_filter("Word Documents", files::WORD_EXTS)
-                    .add_filter("Other Documents (converted with LibreOffice)", files::IMPORT_EXTS)
+                    .add_filter(tr("All Documents"), &all)
+                    .add_filter(tr("Word Documents"), files::WORD_EXTS)
+                    .add_filter(tr("Other Documents (converted with LibreOffice)"), files::IMPORT_EXTS)
                     .pick_file();
                 if let Some(p) = picked {
                     self.open_path(&p);
@@ -1009,7 +1012,7 @@ impl App {
                 self.invalidate();
             }
             Cmd::InsertPicture => {
-                if let Some(path) = rfd::FileDialog::new().add_filter("Pictures", &["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff"]).pick_file() {
+                if let Some(path) = rfd::FileDialog::new().add_filter(tr("Pictures"), &["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff"]).pick_file() {
                     match std::fs::read(&path) {
                         Ok(bytes) => match image::load_from_memory(&bytes).map(|i| (i.width(), i.height())) {
                             Ok((w, h)) => {
@@ -1017,9 +1020,9 @@ impl App {
                                 let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
                                 self.insert_picture(bytes, &ext, &name, w as f32 * 0.75, h as f32 * 0.75);
                             }
-                            Err(e) => self.dialog = Dialog::Message("Unsupported picture".into(), e.to_string()),
+                            Err(e) => self.dialog = Dialog::Message(tr("Unsupported picture").into(), e.to_string()),
                         },
-                        Err(e) => self.dialog = Dialog::Message("Couldn't read the picture".into(), e.to_string()),
+                        Err(e) => self.dialog = Dialog::Message(tr("Couldn't read the picture").into(), e.to_string()),
                     }
                 }
             }
@@ -1040,7 +1043,7 @@ impl App {
             Cmd::NewWordArt(style) => {
                 let theme_font = self.doc.theme.major_latin.clone();
                 let font = if theme_font.is_empty() { "Arial".to_string() } else { theme_font };
-                let art = rusty_document_writer::wordart::WordArt { style, text: "Your text here".into(), font, size: 40.0 };
+                let art = rusty_document_writer::wordart::WordArt { style, text: tr("Your text here").into(), font, size: 40.0 };
                 self.wordart_edit = Some(wordart_ui::WordArtEdit::new(None, art));
             }
             Cmd::EditWordArt(path, off) => {
@@ -1167,12 +1170,12 @@ impl App {
             Cmd::WordCount => self.dialog = Dialog::WordCount,
             Cmd::About => {
                 self.dialog = Dialog::Message(
-                    "About RustyDocumentWriter".into(),
-                    "RustyDocumentWriter — an open-source word processor built around faithful DOCX layout.\n\nWritten in Rust. Layout follows the format's real-world rules (GDI line metrics, tab, spacing, widow/orphan and table conventions) and documents round-trip without losing unknown content.".into(),
+                    tr("About RustyDocumentWriter").into(),
+                    tr("RustyDocumentWriter — an open-source word processor built around faithful DOCX layout.\n\nWritten in Rust. Layout follows the format's real-world rules (GDI line metrics, tab, spacing, widow/orphan and table conventions) and documents round-trip without losing unknown content.").into(),
                 )
             }
             Cmd::Unsupported(what) => {
-                self.dialog = Dialog::Message("Not available yet".into(), format!("“{what}” isn't implemented in this version of RustyDocumentWriter yet. Any existing content of this kind in your documents is preserved when you save."))
+                self.dialog = Dialog::Message(tr("Not available yet").into(), tf("“{}” isn't implemented in this version of RustyDocumentWriter yet. Any existing content of this kind in your documents is preserved when you save.", &[&tr(what)]))
             }
         }
     }
@@ -1183,6 +1186,11 @@ impl App {
         f(&mut self.settings);
         if self.settings != before {
             self.settings.save();
+        }
+        if self.settings.language != before.language {
+            // Labels built from document state ("Aptos (Body)") are refreshed in the new language.
+            i18n::set(i18n::resolve(&self.settings.language));
+            self.update_toolbar();
         }
     }
 
@@ -1285,7 +1293,7 @@ impl App {
                     ui.add_space(6.0);
                     ui.label(body);
                     ui.add_space(10.0);
-                    if ui.button("  OK  ").clicked() {
+                    if ui.button(format!("  {}  ", tr("OK"))).clicked() {
                         close = true;
                     }
                 });
@@ -1299,17 +1307,17 @@ impl App {
                 let pages = self.layout.as_ref().map(|l| l.pages.len()).unwrap_or(1);
                 egui::Modal::new(egui::Id::NULL.with("wc")).show(ctx, |ui| {
                     ui.set_width(300.0);
-                    ui.heading("Word Count");
+                    ui.heading(tr("Word Count"));
                     ui.add_space(6.0);
                     egui::Grid::new("wcg").num_columns(2).spacing([40.0, 6.0]).show(ui, |ui| {
                         for (k, v) in [("Pages", pages), ("Words", words), ("Characters (no spaces)", chars_ns), ("Characters (with spaces)", chars), ("Paragraphs", paras)] {
-                            ui.label(k);
+                            ui.label(tr(k));
                             ui.label(v.to_string());
                             ui.end_row();
                         }
                     });
                     ui.add_space(10.0);
-                    if ui.button("  Close  ").clicked() {
+                    if ui.button(format!("  {}  ", tr("Close"))).clicked() {
                         close = true;
                     }
                 });
@@ -1321,20 +1329,20 @@ impl App {
                     ui.set_width(380.0);
                     ui.heading("RustyDocumentWriter");
                     ui.add_space(6.0);
-                    ui.label(format!("Do you want to save changes to “{name}”?"));
+                    ui.label(tf("Do you want to save changes to “{}”?", &[&name]));
                     ui.add_space(12.0);
                     ui.horizontal(|ui| {
-                        if ui.button("  Save  ").clicked() && self.save(false) {
+                        if ui.button(format!("  {}  ", tr("Save"))).clicked() && self.save(false) {
                             self.modified = false;
                             close = true;
                             cmds.push(then.clone());
                         }
-                        if ui.button("  Don't Save  ").clicked() {
+                        if ui.button(format!("  {}  ", tr("Don't Save"))).clicked() {
                             self.modified = false;
                             close = true;
                             cmds.push(then.clone());
                         }
-                        if ui.button("  Cancel  ").clicked() {
+                        if ui.button(format!("  {}  ", tr("Cancel"))).clicked() {
                             close = true;
                         }
                     });
@@ -1350,29 +1358,29 @@ impl App {
             }
             Dialog::Find => {
                 let mut open = true;
-                egui::Window::new("Find and Replace").open(&mut open).collapsible(false).resizable(false).default_pos([500.0, 220.0]).show(ctx, |ui| {
+                egui::Window::new(tr("Find and Replace")).open(&mut open).collapsible(false).resizable(false).default_pos([500.0, 220.0]).show(ctx, |ui| {
                     egui::Grid::new("fr").num_columns(2).show(ui, |ui| {
-                        ui.label("Find what:");
+                        ui.label(tr("Find what:"));
                         let r = ui.add(egui::TextEdit::singleline(&mut self.find_text).desired_width(240.0));
                         if self.frame_count % 1000 == 0 {
                             r.request_focus();
                         }
                         ui.end_row();
-                        ui.label("Replace with:");
+                        ui.label(tr("Replace with:"));
                         ui.add(egui::TextEdit::singleline(&mut self.replace_text).desired_width(240.0));
                         ui.end_row();
                     });
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if ui.button("Find Next").clicked() {
+                        if ui.button(tr("Find Next")).clicked() {
                             self.find_next();
                         }
-                        if ui.button("Replace").clicked() {
+                        if ui.button(tr("Replace")).clicked() {
                             self.replace_one();
                         }
-                        if ui.button("Replace All").clicked() {
+                        if ui.button(tr("Replace All")).clicked() {
                             let n = self.replace_all();
-                            self.dialog = Dialog::Message("Replace All".into(), format!("RustyDocumentWriter made {n} replacement(s)."));
+                            self.dialog = Dialog::Message(tr("Replace All").into(), tf("RustyDocumentWriter made {} replacement(s).", &[&n]));
                         }
                     });
                 });

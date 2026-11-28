@@ -2,7 +2,7 @@
 //! background (LibreOffice imports/exports and PDF rendering) behind a
 //! "Converting…" dialog instead of freezing the window.
 
-use super::{App, Dialog};
+use super::{tf, tr, App, Dialog};
 use rusty_document_writer::convert::{self, Format, Kind};
 use rusty_document_writer::document::Document;
 use rusty_document_writer::layout::{self, LayoutOptions};
@@ -76,13 +76,13 @@ impl App {
         if format.convertible() {
             if convert::libreoffice().is_none() {
                 self.dialog = Dialog::Message(
-                    "LibreOffice is needed".into(),
-                    format!("“{}” is a {}. RustyDocumentWriter converts these with LibreOffice, which isn't installed. Install it from libreoffice.org, or save the file as .docx in another program.", file_name(p), format.describe()),
+                    tr("LibreOffice is needed").into(),
+                    tf("“{}” is a {}. RustyDocumentWriter converts these with LibreOffice, which isn't installed. Install it from libreoffice.org, or save the file as .docx in another program.", &[&file_name(p), &tr(format.describe())]),
                 );
                 return;
             }
             let path = p.to_path_buf();
-            self.start_job(format!("Converting “{}”…", file_name(p)), move || Done::Opened(path.clone(), Document::import(&path).map(Box::new)));
+            self.start_job(tf("Converting “{}”…", &[&file_name(p)]), move || Done::Opened(path.clone(), Document::import(&path).map(Box::new)));
             return;
         }
         match Document::open(p) {
@@ -97,7 +97,7 @@ impl App {
                     self.recent.retain(|x| x != p);
                     self.save_recent();
                 }
-                self.dialog = Dialog::Message("Couldn't open the document".into(), e)
+                self.dialog = Dialog::Message(tr("Couldn't open the document").into(), e)
             }
         }
     }
@@ -111,10 +111,10 @@ impl App {
         let current = self.doc.path.as_deref().map(ext_of).filter(|e| WORD_EXTS.contains(&e.as_str()));
         let ext = current.unwrap_or_else(|| if self.doc.has_macros() { "docm".into() } else { "docx".into() });
         let mut filters: Vec<(&str, &[&str])> = vec![
-            ("Word Document", &["docx"]),
-            ("Word Macro-Enabled Document", &["docm"]),
-            ("Word Template", &["dotx"]),
-            ("Word Macro-Enabled Template", &["dotm"]),
+            (tr("Word Document"), &["docx"]),
+            (tr("Word Macro-Enabled Document"), &["docm"]),
+            (tr("Word Template"), &["dotx"]),
+            (tr("Word Macro-Enabled Template"), &["dotm"]),
         ];
         // The dialog's first filter is the default one.
         if let Some(i) = filters.iter().position(|(_, e)| e[0] == ext) {
@@ -144,7 +144,7 @@ impl App {
                 d = d.add_filter(*name, &[*ext]);
             }
         }
-        d = d.add_filter("Plain Text", &["txt"]);
+        d = d.add_filter(tr("Plain Text"), &["txt"]);
         if let Some(dir) = self.doc.path.as_ref().and_then(|p| p.parent()) {
             d = d.set_directory(dir);
         }
@@ -155,26 +155,26 @@ impl App {
         match ext.as_str() {
             "pdf" => {
                 let (doc, fonts, title) = (self.doc.clone(), self.fonts.clone(), self.doc.title());
-                self.start_job(format!("Exporting “{name}”…"), move || {
+                self.start_job(tf("Exporting “{}”…", &[&name]), move || {
                     let layout = layout::layout_document(&doc, &fonts, &LayoutOptions::default());
                     Done::Exported(pdf::export(&layout, &title, PDF_DPI, &path))
                 });
             }
             "txt" => {
                 if let Err(e) = std::fs::write(&path, self.doc.plain_text()) {
-                    self.dialog = Dialog::Message("Couldn't export".into(), format!("Cannot write {}: {e}", path.display()));
+                    self.dialog = Dialog::Message(tr("Couldn't export").into(), tf("Cannot write {}: {}", &[&path.display(), &e]));
                 }
             }
             e if have_lo && convert::EXPORTS.iter().any(|(x, _, _)| *x == e) => {
                 let pkg = self.doc.to_package();
-                self.start_job(format!("Exporting “{name}” with LibreOffice…"), move || {
+                self.start_job(tf("Exporting “{}” with LibreOffice…", &[&name]), move || {
                     let tmp = std::env::temp_dir().join(format!("rdw-export-{}.docx", std::process::id()));
                     let r = pkg.save(&tmp).and_then(|_| convert::from_docx(&tmp, &path));
                     let _ = std::fs::remove_file(&tmp);
                     Done::Exported(r)
                 });
             }
-            e => self.dialog = Dialog::Message("Couldn't export".into(), format!("RustyDocumentWriter can't export .{e} files.")),
+            e => self.dialog = Dialog::Message(tr("Couldn't export").into(), tf("RustyDocumentWriter can't export .{} files.", &[&e])),
         }
     }
 
@@ -192,14 +192,14 @@ impl App {
                         self.push_recent(&p);
                         if format != Format::Docx {
                             self.dialog = Dialog::Message(
-                                format!("Converted a {}", format.describe()),
-                                format!("“{}” was converted to a Word document with LibreOffice. Saving creates a new .docx; the original file is not changed.", file_name(&p)),
+                                tf("Converted a {}", &[&tr(format.describe())]),
+                                tf("“{}” was converted to a Word document with LibreOffice. Saving creates a new .docx; the original file is not changed.", &[&file_name(&p)]),
                             );
                         }
                     }
-                    Done::Opened(_, Err(e)) => self.dialog = Dialog::Message("Couldn't open the document".into(), e),
+                    Done::Opened(_, Err(e)) => self.dialog = Dialog::Message(tr("Couldn't open the document").into(), e),
                     Done::Exported(Ok(())) => {}
-                    Done::Exported(Err(e)) => self.dialog = Dialog::Message("Couldn't export".into(), e),
+                    Done::Exported(Err(e)) => self.dialog = Dialog::Message(tr("Couldn't export").into(), e),
                 }
             }
             Err(mpsc::TryRecvError::Empty) => {
@@ -219,7 +219,7 @@ impl App {
             }
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.job = None;
-                self.dialog = Dialog::Message("Something went wrong".into(), "The conversion stopped unexpectedly.".into());
+                self.dialog = Dialog::Message(tr("Something went wrong").into(), tr("The conversion stopped unexpectedly.").into());
             }
         }
     }

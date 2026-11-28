@@ -8,6 +8,8 @@ use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
+    /// Interface language: "system", or a code from `i18n::LANGS` ("en", "el").
+    pub language: String,
     /// Theme used when not following the system.
     pub theme: String,
     /// Switch between `light_theme` and `dark_theme` with the system's appearance.
@@ -39,6 +41,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
+            language: "system".into(),
             theme: "Black".into(),
             follow_system: false,
             light_theme: "White".into(),
@@ -100,6 +103,7 @@ impl Settings {
     pub fn to_text(&self) -> String {
         let b = |v: bool| if v { "true" } else { "false" };
         let lines = [
+            ("language", self.language.clone()),
             ("theme", self.theme.clone()),
             ("follow_system", b(self.follow_system).into()),
             ("light_theme", self.light_theme.clone()),
@@ -135,6 +139,7 @@ impl Settings {
             let flag = matches!(v, "true" | "1" | "yes");
             let num = v.parse::<f32>().ok().filter(|n| n.is_finite());
             match k {
+                "language" => s.language = v.into(),
                 "theme" => s.theme = v.into(),
                 "follow_system" => s.follow_system = flag,
                 "light_theme" => s.light_theme = v.into(),
@@ -207,6 +212,7 @@ impl Settings {
 
     /// Bring the UI in line with these settings (cheap when nothing changed).
     pub fn apply(&self, ctx: &egui::Context) {
+        super::i18n::set(super::i18n::resolve(&self.language));
         let system_dark = ctx.system_theme().map(|t| t == egui::Theme::Dark);
         theme::set(ctx, self.effective_theme(system_dark), self.accent);
         if (ctx.zoom_factor() - self.ui_scale).abs() > 0.001 {
@@ -227,6 +233,7 @@ mod tests {
         s.ui_scale = 1.25;
         s.ribbon_collapsed = true;
         s.status_language = false;
+        s.language = "el".into();
         assert_eq!(Settings::from_text(&s.to_text()), s);
         let odd = Settings::from_text("nonsense\nui_scale = 99\naccent = nothex\nfuture_key = 1\n");
         assert_eq!(odd.ui_scale, 2.0);
